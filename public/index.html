@@ -388,8 +388,8 @@
 
   function buildLine(d) {
     var s = d.stock, iz = d.intraday || {};
-    var bar = "━━━━━━━━━━━━━━━━━━━━";
-    var sep = "────────────────────";
+    var bar = "━━━━━━━━━━━━━";
+    var sep = "─────────────";
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
     if (iz.hasQuote) {
