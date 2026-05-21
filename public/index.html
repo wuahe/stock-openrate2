@@ -386,10 +386,11 @@
     });
   }
 
-  function buildLine(d) {
+  function buildLine(d, sepLen) {
     var s = d.stock, iz = d.intraday || {};
-    var bar = "━━━━━━━━━━━━━";
-    var sep = "─────────────";
+    var n = sepLen || 13;
+    var bar = "━".repeat(n);
+    var sep = "─".repeat(n);
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
     if (iz.hasQuote) {
@@ -424,7 +425,7 @@
     var head = "以下是「" + s.name + "(" + s.code + ")」近 " +
       d.daily.length + " 日的開盤溢價追蹤資料(TWSE/TPEX 官方)。" +
       "請用專業但中立的角度,評論它的漲跌趨勢,並提醒這非投資建議。\n\n";
-    return head + buildLine(d);
+    return head + buildLine(d, 8);
   }
 
   function copy(text, okMsg) {
