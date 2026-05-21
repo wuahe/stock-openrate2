@@ -388,7 +388,7 @@
 
   function buildLine(d, sepLen) {
     var s = d.stock, iz = d.intraday || {};
-    var n = sepLen || 13;
+    var n = sepLen || 11;
     var bar = "━".repeat(n);
     var sep = "─".repeat(n);
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
