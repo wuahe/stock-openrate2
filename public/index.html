@@ -354,14 +354,14 @@
 
     h += '<div class="tablewrap"><table><thead><tr>' +
          "<th>日期</th><th>開盤</th><th>溢價%</th>" +
-         "<th>收盤</th><th>漲跌%</th><th>量(張)</th>" +
+         "<th>漲跌%</th><th>收盤</th><th>量(張)</th>" +
          "</tr></thead><tbody>";
     d.daily.forEach(function (r) {
       h += "<tr><td>" + md(r.date) + "</td>" +
            "<td>" + (r.open != null ? r.open.toFixed(2) : "—") + "</td>" +
            '<td class="' + cls(r.premiumPct) + '">' + sign(r.premiumPct) + "</td>" +
-           "<td>" + (r.close != null ? r.close.toFixed(2) : "—") + "</td>" +
            '<td class="' + cls(r.changePct) + '">' + sign(r.changePct) + "</td>" +
+           "<td>" + (r.close != null ? r.close.toFixed(2) : "—") + "</td>" +
            "<td>" + fmtVol(r.volumeLots || 0) + "</td></tr>";
     });
     h += "</tbody></table></div>";
