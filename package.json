@@ -1,0 +1,15 @@
+{
+  "name": "twstock-premium-tracker",
+  "version": "1.0.0",
+  "description": "台股開盤溢價追蹤 — 查詢上市/上櫃個股近 N 日開盤溢價、漲跌與量能",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
