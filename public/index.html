@@ -454,7 +454,8 @@
 
   function buildAI(d) {
     var s = d.stock;
-    var head = "以下是「" + s.name + "(" + s.code + ")」近 " +
+    var head = "你是一位專業的股票分析師。先給接下來這幾天該如何操作的建議,然後再做分析及未來的展望。\n" +
+      "以下是「" + s.name + "(" + s.code + ")」近 " +
       d.daily.length + " 日的開盤溢價追蹤資料(TWSE/TPEX 官方)。" +
       "請用專業但中立的角度,評論它的漲跌趨勢,並提醒這非投資建議。\n\n";
     return head + buildLine(d, 8);
