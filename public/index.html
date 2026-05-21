@@ -299,6 +299,31 @@
   }
   function md(iso) { return iso.slice(5).replace("-", "/"); }
 
+  // 是否處於台股盤中(以台北時間判斷,週一至週五 09:00–13:30)
+  function inTwSession() {
+    var now = new Date();
+    var wd = now.toLocaleDateString("en-US", {
+      timeZone: "Asia/Taipei", weekday: "short"
+    });
+    if (wd === "Sat" || wd === "Sun") return false;
+    var hms = now.toLocaleTimeString("en-GB", {
+      timeZone: "Asia/Taipei", hour12: false
+    });
+    var mins = parseInt(hms.slice(0, 2), 10) * 60 + parseInt(hms.slice(3, 5), 10);
+    return mins >= 540 && mins < 810;
+  }
+
+  // 把 ISO 時間(或現在)格式化為台北時間 MM/DD HH:MM
+  function twClock(iso) {
+    var d = iso ? new Date(iso) : new Date();
+    var p = {};
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei", hour12: false,
+      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+    }).formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    return p.month + "/" + p.day + " " + p.hour + ":" + p.minute;
+  }
+
   async function query(raw) {
     var q = (raw || "").trim();
     if (!q) { toast("請輸入股票名稱或代號"); return; }
@@ -332,6 +357,7 @@
 
   function render(d) {
     var s = d.stock, iz = d.intraday || {};
+    var live = inTwSession();
     var h = '<div class="card">';
 
     h += '<div class="stockhead"><div class="nm">' + s.name +
@@ -339,8 +365,8 @@
          '<div class="meta">' + s.market + " ｜ 近 " + d.daily.length + " 日</div></div>";
 
     if (iz.hasQuote) {
-      h += '<div class="intraday"><div class="tag">⚠ 盤中即時 ' +
-           (iz.time || "").slice(0, 5) + "</div>" +
+      h += '<div class="intraday"><div class="tag">' +
+           (live ? "⚠ 盤中即時 " : "🏁 收盤 ") + (iz.time || "").slice(0, 5) + "</div>" +
            '<div class="bigprice"><span class="p ' + cls(iz.changePct) + '">' +
            (iz.price != null ? iz.price.toFixed(2) : "—") + "</span>" +
            '<span class="chg ' + cls(iz.changePct) + '">' + sign(iz.changePct) +
@@ -372,7 +398,8 @@
 
     h += '<div class="foot">📐 溢價%=(今開−昨收)/昨收　📐 漲跌%=(今收−昨收)/昨收<br />' +
          "📡 " + d.source + "　🔴漲 🟢跌<br />" +
-         (iz.hasQuote ? "⚠ 盤中列為即時快照,收盤後可再查核對" : "") +
+         "🕒 查詢時間 " + twClock(d.fetchedAt) + "(台北)" +
+         (iz.hasQuote && live ? "<br />⚠ 盤中為即時快照,收盤後可再查核對" : "") +
          "</div>";
 
     h += "</div>";
@@ -388,16 +415,17 @@
 
   function buildLine(d, sepLen) {
     var s = d.stock, iz = d.intraday || {};
+    var live = inTwSession();
     var n = sepLen || 11;
     var bar = "━".repeat(n);
     var sep = "─".repeat(n);
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
     if (iz.hasQuote) {
-      L.push("📅 盤中 ⚠️ " + (iz.time || "").slice(0, 5));
+      L.push("📅 " + (live ? "盤中 ⚠️ " : "收盤 ") + (iz.time || "").slice(0, 5));
       L.push("開盤 " + iz.open.toFixed(2) + "  溢價 " +
              sign(iz.premiumPct) + mark(iz.premiumPct));
-      L.push("現價 " + iz.price.toFixed(2) + "  漲跌 " +
+      L.push((live ? "現價 " : "收盤 ") + iz.price.toFixed(2) + "  漲跌 " +
              sign(iz.changePct) + mark(iz.changePct));
       L.push("量 " + fmtVol(iz.volumeLots || 0) + "張" +
              (iz.limitLocked ? "(漲停鎖死)" : ""));
@@ -415,7 +443,8 @@
     L.push("📐 溢價%=(今開−昨收)/昨收");
     L.push("📐 漲跌%=(今收−昨收)/昨收");
     L.push("📡 資料:TWSE / TPEX 官方");
-    if (iz.hasQuote) L.push("⚠️ 盤中列為即時快照,收盤後可再查核對");
+    L.push("🕒 查詢時間 " + twClock(d.fetchedAt) + "(台北)");
+    if (iz.hasQuote && live) L.push("⚠️ 盤中為即時快照,收盤後可再查核對");
     L.push(bar);
     return L.join("\n");
   }
