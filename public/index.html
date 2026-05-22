@@ -377,7 +377,8 @@
            "</span></div>" +
            '<div class="row2"><span>開 ' +
            (iz.open != null ? iz.open.toFixed(2) : "—") +
-           " ｜ 溢價 " + sign(iz.premiumPct) + "</span>" +
+           ' ｜ 溢價 <span class="' + cls(iz.premiumPct) + '">' +
+           sign(iz.premiumPct) + "</span></span>" +
            "<span>量 " + fmtVol(iz.volumeLots || 0) + "張</span></div></div>";
     }
 
