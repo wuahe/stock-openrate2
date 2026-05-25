@@ -194,6 +194,12 @@
     if (n === null || n === undefined || !isFinite(n) || n === 0) return "";
     return n > 0 ? "up" : "down";
   }
+  // 防 XSS:後端字串拼進 innerHTML 前一律 escape
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
 
   async function run() {
     var q = document.getElementById("q").value.trim();
@@ -244,9 +250,9 @@
     var html = "";
     html += '<div class="card">';
     html += '<div class="stock-title">';
-    html += '<span class="code">' + s.code + '</span>';
-    html += '<span class="name">' + s.name + '</span>';
-    html += '<span class="badge">' + s.market + '</span>';
+    html += '<span class="code">' + esc(s.code) + '</span>';
+    html += '<span class="name">' + esc(s.name) + '</span>';
+    html += '<span class="badge">' + esc(s.market) + '</span>';
     html += '</div>';
 
     // 即時報價
@@ -267,10 +273,10 @@
       html += '</div>';
       html += '<div style="font-size:11px;color:var(--ink-dim);margin-top:8px">';
       if (it.stale) {
-        html += '<span class="warn">⚠ 延遲快照</span> ' + (it.snapshotAt || it.time || '—');
-        if (it.staleReason) html += '<br><span style="opacity:.7">' + it.staleReason + '</span>';
+        html += '<span class="warn">⚠ 延遲快照</span> ' + esc(it.snapshotAt || it.time || '—');
+        if (it.staleReason) html += '<br><span style="opacity:.7">' + esc(it.staleReason) + '</span>';
       } else {
-        html += '資料時間 ' + (it.snapshotAt || it.time || '—');
+        html += '資料時間 ' + esc(it.snapshotAt || it.time || '—');
       }
       html += '</div>';
     } else {
@@ -281,7 +287,7 @@
     // 警示
     if (alerts.length) {
       html += '<div class="alert"><strong>流動性提醒</strong><ul>';
-      alerts.forEach(function (a) { html += '<li>' + a + '</li>'; });
+      alerts.forEach(function (a) { html += '<li>' + esc(a) + '</li>'; });
       html += '</ul></div>';
     }
 
@@ -294,7 +300,7 @@
     daily.forEach(function (d) {
       var vrCls = (d.volumeRatio && d.volumeRatio >= 3) ? 'vr-high' : '';
       html += '<tr>';
-      html += '<td class="date">' + d.date.slice(5) + '</td>';
+      html += '<td class="date">' + esc(d.date.slice(5)) + '</td>';
       html += '<td>' + fmt(d.close) + '</td>';
       html += '<td class="' + cls(d.changePct) + '">' + fmtPct(d.changePct) + '</td>';
       html += '<td>' + fmt(d.high) + '</td>';

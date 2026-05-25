@@ -55,6 +55,14 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`台股溢價追蹤伺服器已啟動,port ${PORT}`);
+});
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`✗ port ${PORT} 已被占用。先關掉占用程序,或用 PORT=8090 npm start 改埠。`);
+  } else {
+    console.error("✗ server 啟動失敗:", err.message);
+  }
+  process.exit(1);
 });

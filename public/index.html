@@ -346,8 +346,13 @@
       var data = await res.json();
       document.getElementById("status").innerHTML = "";
       if (data.error) {
-        document.getElementById("result").innerHTML =
-          '<div class="err">' + data.error + "</div>";
+        // 用 textContent 避免 XSS:錯誤訊息會包含使用者輸入的代號/名稱
+        var errBox = document.createElement("div");
+        errBox.className = "err";
+        errBox.textContent = data.error;
+        var rb = document.getElementById("result");
+        rb.innerHTML = "";
+        rb.appendChild(errBox);
         return;
       }
       lastData = data;
@@ -362,25 +367,36 @@
     }
   }
 
+  // 防 XSS:後端字串(個股名稱、市場別、source 等)即使來自官方 API,
+  // 拼進 innerHTML 前一律 escape,避免上游若被污染就在使用者瀏覽器執行
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  // 安全的數字格式化:給 buildLine / render 統一使用,避免 null.toFixed 崩潰
+  function fmt2(n) {
+    return (n == null || !isFinite(n)) ? "—" : Number(n).toFixed(2);
+  }
+
   function render(d) {
     var s = d.stock, iz = d.intraday || {};
     var live = inTwSession();
     var h = '<div class="card">';
 
-    h += '<div class="stockhead"><div class="nm">' + s.name +
-         "<code>" + s.code + "</code></div>" +
-         '<div class="meta">' + s.market + " ｜ 近 " + d.daily.length + " 日</div></div>";
+    h += '<div class="stockhead"><div class="nm">' + esc(s.name) +
+         "<code>" + esc(s.code) + "</code></div>" +
+         '<div class="meta">' + esc(s.market) + " ｜ 近 " + d.daily.length + " 日</div></div>";
 
     if (iz.hasQuote) {
       h += '<div class="intraday"><div class="tag">' +
-           (live ? "⚠ 盤中即時 " : "🏁 收盤 ") + (iz.time || "").slice(0, 5) + "</div>" +
+           (live ? "⚠ 盤中即時 " : "🏁 收盤 ") + esc((iz.time || "").slice(0, 5)) + "</div>" +
            '<div class="bigprice"><span class="p ' + cls(iz.changePct) + '">' +
-           (iz.price != null ? iz.price.toFixed(2) : "—") + "</span>" +
+           fmt2(iz.price) + "</span>" +
            '<span class="chg ' + cls(iz.changePct) + '">' + sign(iz.changePct) +
            (iz.limitLocked ? '<span class="lock">漲停鎖死</span>' : "") +
            "</span></div>" +
-           '<div class="row2"><span>開 ' +
-           (iz.open != null ? iz.open.toFixed(2) : "—") +
+           '<div class="row2"><span>開 ' + fmt2(iz.open) +
            ' ｜ 溢價 <span class="' + cls(iz.premiumPct) + '">' +
            sign(iz.premiumPct) + "</span></span>" +
            "<span>量 " + fmtVol(iz.volumeLots || 0) + "張</span></div></div>";
@@ -391,11 +407,11 @@
          "<th>漲跌%</th><th>收盤</th><th>量(張)</th>" +
          "</tr></thead><tbody>";
     d.daily.forEach(function (r) {
-      h += "<tr><td>" + md(r.date) + "</td>" +
-           "<td>" + (r.open != null ? r.open.toFixed(2) : "—") + "</td>" +
+      h += "<tr><td>" + esc(md(r.date)) + "</td>" +
+           "<td>" + fmt2(r.open) + "</td>" +
            '<td class="' + cls(r.premiumPct) + '">' + sign(r.premiumPct) + "</td>" +
            '<td class="' + cls(r.changePct) + '">' + sign(r.changePct) + "</td>" +
-           "<td>" + (r.close != null ? r.close.toFixed(2) : "—") + "</td>" +
+           "<td>" + fmt2(r.close) + "</td>" +
            "<td>" + fmtVol(r.volumeLots || 0) + "</td></tr>";
     });
     h += "</tbody></table></div>";
@@ -405,8 +421,8 @@
          '<button class="btn-ai" id="cpAI">🤖 打包給 AI 點評</button></div>';
 
     h += '<div class="foot">📐 溢價%=(今開−昨收)/昨收　📐 漲跌%=(今收−昨收)/昨收<br />' +
-         "📡 " + d.source + "　🔴漲 🟢跌<br />" +
-         "🕒 查詢時間 " + twClock(d.fetchedAt) + "(台北)" +
+         "📡 " + esc(d.source) + "　🔴漲 🟢跌<br />" +
+         "🕒 查詢時間 " + esc(twClock(d.fetchedAt)) + "(台北)" +
          (iz.hasQuote && live ? "<br />⚠ 盤中為即時快照,收盤後可再查核對" : "") +
          "</div>";
 
@@ -431,9 +447,10 @@
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
     if (iz.hasQuote) {
       L.push("📅 " + (live ? "盤中 ⚠️ " : "收盤 ") + (iz.time || "").slice(0, 5));
-      L.push("開盤 " + iz.open.toFixed(2) + "  溢價 " +
+      // 用 fmt2 避免 iz.open/iz.price 為 null 時 .toFixed 拋 TypeError
+      L.push("開盤 " + fmt2(iz.open) + "  溢價 " +
              sign(iz.premiumPct) + mark(iz.premiumPct));
-      L.push((live ? "現價 " : "收盤 ") + iz.price.toFixed(2) + "  漲跌 " +
+      L.push((live ? "現價 " : "收盤 ") + fmt2(iz.price) + "  漲跌 " +
              sign(iz.changePct) + mark(iz.changePct));
       L.push("量 " + fmtVol(iz.volumeLots || 0) + "張" +
              (iz.limitLocked ? "(漲停鎖死)" : ""));
@@ -441,9 +458,9 @@
     }
     d.daily.forEach(function (r) {
       L.push("📅 " + md(r.date));
-      L.push("開盤 " + (r.open != null ? r.open.toFixed(2) : "—") +
+      L.push("開盤 " + fmt2(r.open) +
              "  溢價 " + sign(r.premiumPct) + mark(r.premiumPct));
-      L.push("收盤 " + (r.close != null ? r.close.toFixed(2) : "—") +
+      L.push("收盤 " + fmt2(r.close) +
              "  漲跌 " + sign(r.changePct) + mark(r.changePct));
       L.push("量 " + fmtVol(r.volumeLots || 0) + "張");
       L.push(sep);

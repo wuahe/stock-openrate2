@@ -11,10 +11,23 @@ let SECURITY_CACHE = null;
 let SECURITY_CACHE_TS = 0;
 const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 
-async function httpJson(url) {
-  const res = await fetch(url, { headers: { "User-Agent": UA } });
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  return res.json();
+async function httpJson(url, timeoutMs = 10000) {
+  // 為外部 API 加上 timeout,避免 TWSE/TPEX 連線懸住時 Express handler 也一直等
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": UA },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error(`上游逾時 ${timeoutMs}ms: ${url.slice(0, 60)}…`);
+    throw e;
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 function num(v) {

@@ -21,20 +21,30 @@ const YAHOO_CACHE = new Map();
 const YAHOO_TTL = 60 * 60 * 1000;
 
 async function httpJson(url, opts) {
-  const { retries = 0, retryDelay = 500, ua = UA } = opts || {};
+  const { retries = 0, retryDelay = 500, ua = UA, timeoutMs = 10000 } = opts || {};
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // 為外部 API 加上 timeout,避免 TPEX/Yahoo 連線懸住時 Express handler 也卡死
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = await fetch(url, { headers: { "User-Agent": ua } });
+      const res = await fetch(url, {
+        headers: { "User-Agent": ua },
+        signal: ctrl.signal,
+      });
       if (!res.ok) {
         lastErr = new Error("HTTP " + res.status);
         // 429 / 5xx 才重試,4xx 其他直接放棄
         if (res.status !== 429 && res.status < 500) throw lastErr;
       } else {
-        return res.json();
+        return await res.json();
       }
     } catch (e) {
-      lastErr = e;
+      lastErr = e.name === "AbortError"
+        ? new Error(`上游逾時 ${timeoutMs}ms: ${url.slice(0, 60)}…`)
+        : e;
+    } finally {
+      clearTimeout(tid);
     }
     if (attempt < retries) {
       await new Promise((r) => setTimeout(r, retryDelay * (attempt + 1)));
@@ -113,20 +123,30 @@ async function resolveEmerging(query) {
 
 // 真即時 — mis.tpex GETQ20 (POST,回 XML)
 async function fetchRealtime(code) {
-  const res = await fetch("https://mis.tpex.org.tw/Quote.asmx/GETQ20", {
-    method: "POST",
-    headers: {
-      "User-Agent": UA,
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-      "Referer": "https://mis.tpex.org.tw/IB120STK.aspx",
-      "X-Requested-With": "XMLHttpRequest",
-    },
-    body: "SymbolID=" + encodeURIComponent(code),
-  });
-  if (!res.ok) throw new Error("mis.tpex HTTP " + res.status);
-  const xml = await res.text();
-  if (!xml.includes("<SymbolID>")) throw new Error("mis.tpex 回應為空");
-  return parseRealtimeXml(xml);
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch("https://mis.tpex.org.tw/Quote.asmx/GETQ20", {
+      method: "POST",
+      headers: {
+        "User-Agent": UA,
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Referer": "https://mis.tpex.org.tw/IB120STK.aspx",
+        "X-Requested-With": "XMLHttpRequest",
+      },
+      body: "SymbolID=" + encodeURIComponent(code),
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("mis.tpex HTTP " + res.status);
+    const xml = await res.text();
+    if (!xml.includes("<SymbolID>")) throw new Error("mis.tpex 回應為空");
+    return parseRealtimeXml(xml);
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("mis.tpex 逾時 8000ms");
+    throw e;
+  } finally {
+    clearTimeout(tid);
+  }
 }
 
 function xmlField(xml, tag) {
