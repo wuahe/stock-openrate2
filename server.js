@@ -6,12 +6,16 @@
 const express = require("express");
 const path = require("path");
 const { resolveStock, fetchDaily, compute } = require("./twstock-core");
+const emergingRouter = require("./emerging/router");
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
 // 靜態網頁
 app.use(express.static(path.join(__dirname, "public")));
+
+// 興櫃子模組(靜態 /emerging/* 與 /api/emerging)
+app.use(emergingRouter);
 
 // 健康檢查(Zeabur 會用得到)
 app.get("/healthz", (req, res) => res.json({ ok: true }));

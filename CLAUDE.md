@@ -24,9 +24,40 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 
 三個檔案,職責清楚分層:
 
-- **`twstock-core.js`** — 純資料層,匯出 `resolveStock` / `fetchDaily` / `compute` 三個無狀態函式(SECURITY_CACHE 除外)。與任何 web 框架解耦(檔頭註解仍寫「Netlify Function」,因為此核心是從 Netlify 版沿用而來)。
-- **`server.js`** — Express 薄層,提供靜態網頁與 `/api/stock` 端點,直接串接 core 的三個函式。末端 `app.get("*")` 把其餘路徑一律回 `index.html`(單頁應用 fallback),新增 API 路由須掛在這條之前。
-- **`public/index.html`** — 單頁前端(HTML/CSS/JS 全部內嵌,無框架、無 build)。
+- **`twstock-core.js`** — 純資料層,匯出 `resolveStock` / `fetchDaily` / `compute` 三個無狀態函式(SECURITY_CACHE 除外)。**只負責上市/上櫃**,興櫃在獨立子模組。
+- **`server.js`** — Express 薄層,提供靜態網頁與 `/api/stock` 端點。在靜態頁與 `*` fallback 之間 `app.use(emergingRouter)` 掛載興櫃子模組。新增 API 路由須掛在 `app.get("*")` 之前。
+- **`public/index.html`** — 上市櫃單頁前端(HTML/CSS/JS 全部內嵌,無框架、無 build)。
+- **`emerging/`** + **`public/emerging/`** — 興櫃子模組,完全自包含,見下節。
+
+### 興櫃子模組
+
+獨立子目錄,刪 `emerging/` + server.js 兩行引用即可整個移除:
+- `emerging/data.js` — 興櫃資料層,`resolveEmerging` / `fetchYahooDaily` / `compute`。
+- `emerging/router.js` — Router 掛 `/api/emerging` 與靜態 `/emerging/*`。
+- `public/emerging/index.html` — 興櫃前端頁。
+
+**混合資料源**(改 data.js 前必讀):
+- **真即時報價 / 五檔 / 今日均價 / 昨均**: `mis.tpex.org.tw/Quote.asmx/GETQ20`(POST form-encoded `SymbolID=XXXX`,回 XML)。分鐘級即時,有完整自營商買賣盤。`fetchRealtime()`,無快取(都已即時了,前端要新就再打)。
+- **清單(代號↔名稱)**: TPEX `openapi/v1/tpex_esb_latest_statistics`。**只用於名稱搜尋**,因為 GETQ20 要精確代號。`SNAPSHOT_CACHE` 60 秒 TTL。涵蓋全部 347 檔興櫃(含定價交易)。
+- **歷史日線(OHLCV)**: **Yahoo Finance** chart API `query1.finance.yahoo.com/v7/finance/chart/{code}.TWO?range=1y&interval=1d`。`YAHOO_CACHE` 1 小時 TTL。最長 ~243 個交易日。
+- **降級**: 若 mis.tpex 故障,`resolveEmerging` 自動退回 openapi 延遲快照,並設 `intraday.stale = true` 讓前端顯示「⚠ 延遲快照」。
+
+**為何不直接用 TPEX openapi 當即時?** 該端點是**前一交易日盤後快照**,週一查到的可能還是上週五 16:30 資料,時間戳會嚴重誤導使用者。mis.tpex GETQ20 才是真即時(每分鐘更新)。
+
+**為何不用 TPEX 的歷史端點?** TPEX `www/zh-tw/emerging/historical` 完全**忽略 date 參數**,任何月份查詢都回最近 ~15 天的同一份資料。試過 2024/05、2025/05、2025/12 全部回 5/4~5/22 — 無法做長期趨勢與量比基準。Yahoo 是唯一能拿長歷史的免費來源。
+
+**mis.tpex 陷阱**: 對「今日尚未成交」的個股,XML 欄位 `TradePrice`/`TradeStatisticAverage` 回 `0` 而非空字串。`parseRealtimeXml` 的 `z2n` helper 把 0 轉 null,避免前端顯示「0.00」誤導為跌停。但 `PreAverage`/`TradeStatisticTtlVol` 不做 z2n(它們的 0 本身就是有意義的資料)。
+
+**Yahoo 反限流陷阱**(重要):
+- Yahoo 對「完整 Chrome User-Agent」字串會 HTTP 429(視為機器人)。
+- **必須用最短 UA `Mozilla/5.0`** 才能成功;`httpJson(url, { ua: "Mozilla/5.0" })` 已在 `fetchYahooDaily` 內處理。
+- 不要把 `data.js` 頂部的 `UA` 改短,那個是給 TPEX 用的;TPEX 反而需要完整 UA。
+
+興櫃 vs 上市櫃指標差異:
+- 議價市場無集合競價,**沒有開盤溢價**。核心指標:**收盤漲跌%**(close-to-close,與主頁邏輯一致)、量比(當日張數 ÷ 近 20 日均量)、買賣價差%。
+- 「日成交均價」只在「即時報價」區塊出現(來自 TPEX),歷史日線表格全部用 Yahoo close。混用會混淆使用者,維持這個分工。
+- 成交量單位:TPEX 是「股」、Yahoo `volume` 也是「股」,兩邊都 ÷1000 換張。與主頁的 TWSE/TPEX 不同(TPEX `tradingStock` 是「張」)。
+- 流動性陷阱:興櫃常見 0 成交、價差 >5%,前端跳警示;`compute` 對 `volumeRatio` 取「i+1 起的 20 筆」當基準,不把當日算入。
 
 ### 查詢資料流
 
