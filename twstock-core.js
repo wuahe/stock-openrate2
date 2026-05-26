@@ -163,19 +163,30 @@ async function probeCode(code, mkt) {
 
 function parseIntraday(m) {
   let price = num(m.z);
-  if (price === null) price = num(m.h) || num(m.l); // 漲跌停鎖死
   const prev = num(m.y);
   const open = num(m.o);
+  const high = num(m.h);
+  const low = num(m.l);
+  const limitUp = num(m.u);
+  const limitDown = num(m.w);
+  // z 為空只在「漲跌停鎖死」時才補 high/low,否則保留 null,避免拿當日最高誤當現價
+  if (price === null) {
+    if (high !== null && limitUp !== null && Math.abs(high - limitUp) < 0.01) {
+      price = high;
+    } else if (low !== null && limitDown !== null && Math.abs(low - limitDown) < 0.01) {
+      price = low;
+    }
+  }
   const r = {
     time: m.t || "",
     price,
     open,
-    high: num(m.h),
-    low: num(m.l),
+    high,
+    low,
     prevClose: prev,
     volumeLots: parseInt(num(m.v) || 0, 10),
-    limitUp: num(m.u),
-    limitDown: num(m.w),
+    limitUp,
+    limitDown,
     hasQuote: price !== null,
   };
   if (price !== null && prev) {
