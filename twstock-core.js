@@ -14,7 +14,7 @@ const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 // 盤中即時報價快取:吸收 mis.twse 偶發故障(msgArray 空)導致今日列閃爍消失
 // key: `${marketKey}_${code}` → { ts, intraday }
 const INTRADAY_CACHE = new Map();
-const INTRADAY_TTL = 30 * 1000; // 30 秒
+const INTRADAY_TTL = 5 * 60 * 1000; // 5 分鐘,避免當日列因上游短暫空值忽隱忽現
 
 async function httpJson(url, opts) {
   // 為外部 API 加上 timeout,避免 TWSE/TPEX 連線懸住時 Express handler 也一直等
@@ -42,6 +42,41 @@ function num(v) {
   if (v === null || v === undefined) return null;
   const n = parseFloat(String(v).replace(/,/g, "").replace(/\+/g, "").trim());
   return Number.isFinite(n) ? n : null;
+}
+
+function twDateFromMs(ms) {
+  if (!ms) return "";
+  const p = {};
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ms)).forEach((x) => {
+    p[x.type] = x.value;
+  });
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function parseTwseDate(v) {
+  const s = String(v || "").trim();
+  if (!/^\d{8}$/.test(s)) return "";
+  return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+}
+
+function hasIntradayRowData(intraday) {
+  return !!(
+    intraday &&
+    intraday.quoteDate &&
+    intraday.open !== null &&
+    intraday.open !== undefined &&
+    intraday.prevClose !== null &&
+    intraday.prevClose !== undefined
+  );
+}
+
+function isTodayIntraday(intraday) {
+  return hasIntradayRowData(intraday) && intraday.quoteDate === twDateFromMs(Date.now());
 }
 
 // ---- 個股清單:名稱 <-> 代號 ----
@@ -126,22 +161,23 @@ async function resolveStock(query) {
     } catch (e) {
       intraday = null;
     }
-    // Yahoo 失敗時退回 mis.twse,再失敗才吃 30 秒快取
-    if (!intraday || !intraday.hasQuote) {
+    // Yahoo 當日 bar 偶爾延遲或欄位不完整,這時改抓 TWSE/TPEX 即時端點補今天那列
+    if (!isTodayIntraday(intraday)) {
       const probed = await probeCode(code, meta.marketKey);
-      if (probed) intraday = probed.intraday;
+      if (probed && isTodayIntraday(probed.intraday)) intraday = probed.intraday;
     }
-    if (!intraday || !intraday.hasQuote) {
+    // 兩個上游都短暫空值時,沿用最近一次可用的當日資料,並標記為快取
+    if (!isTodayIntraday(intraday)) {
       const cached = INTRADAY_CACHE.get(`${meta.marketKey}_${code}`);
       intraday =
         cached && Date.now() - cached.ts < INTRADAY_TTL
           ? { ...cached.intraday, stale: true }
           : intraday || { hasQuote: false };
     }
-    if (intraday && intraday.hasQuote) {
+    if (isTodayIntraday(intraday)) {
       INTRADAY_CACHE.set(`${meta.marketKey}_${code}`, {
         ts: Date.now(),
-        intraday,
+        intraday: { ...intraday, stale: false },
       });
     }
     return {
@@ -234,9 +270,11 @@ async function fetchYahooTwIntraday(code, marketKey) {
         hour12: false,
       })
     : "";
+  const quoteDate = twDateFromMs((ts[i] || meta.regularMarketTime || 0) * 1000);
   const limitUp = twLimitPrice(prev, true);
   const limitDown = twLimitPrice(prev, false);
   const out = {
+    quoteDate,
     time,
     price,
     open,
@@ -309,6 +347,7 @@ function parseIntraday(m) {
     }
   }
   const r = {
+    quoteDate: parseTwseDate(m.d),
     time: m.t || "",
     price,
     open,

@@ -330,12 +330,23 @@
     return p.year + "-" + p.month + "-" + p.day;
   }
 
+  function isTodayQuote(iz) {
+    return !!(iz && iz.quoteDate && iz.quoteDate === twToday());
+  }
+
+  function quoteStamp(iz) {
+    var t = (iz.time || "").slice(0, 5);
+    if (!iz.quoteDate) return t;
+    return (isTodayQuote(iz) ? "" : md(iz.quoteDate) + " ") + t;
+  }
+
   // 盤中或當日歷史尚未發佈時,把 intraday 合成成「今天」這列接到 daily 最前面
-  // 只要有開盤價就插入(即使 z 即時價暫時為 null,溢價%仍算得出來)
+  // 只有報價日期確定是台北今天才插入,避免上游回舊快照時被誤標成當日行情
   function withTodayRow(d) {
     var iz = d.intraday || {};
     if (iz.open === null || iz.open === undefined) return d.daily;
     if (iz.prevClose === null || iz.prevClose === undefined) return d.daily;
+    if (!isTodayQuote(iz)) return d.daily;
     var today = twToday();
     if (d.daily.length && d.daily[0].date === today) return d.daily;
     // 收盤欄:優先即時成交價,沒有就退回 high(冷門股撮合間隙時 z 可能空)
@@ -418,7 +429,8 @@
 
   function render(d) {
     var s = d.stock, iz = d.intraday || {};
-    var live = inTwSession();
+    var quoteIsToday = isTodayQuote(iz);
+    var live = quoteIsToday && inTwSession();
     var h = '<div class="card">';
 
     h += '<div class="stockhead"><div class="nm">' + esc(s.name) +
@@ -427,7 +439,8 @@
 
     if (iz.hasQuote) {
       h += '<div class="intraday"><div class="tag">' +
-           (live ? "⚠ 盤中即時 " : "🏁 收盤 ") + esc((iz.time || "").slice(0, 5)) + "</div>" +
+           (quoteIsToday ? (live ? "⚠ 盤中即時 " : "🏁 當日行情 ") : "↺ 最近行情 ") +
+           esc(quoteStamp(iz)) + (iz.stale ? " · 快取" : "") + "</div>" +
            '<div class="bigprice"><span class="p ' + cls(iz.changePct) + '">' +
            fmt2(iz.price) + "</span>" +
            '<span class="chg ' + cls(iz.changePct) + '">' + sign(iz.changePct) +
@@ -463,6 +476,7 @@
          "📡 " + esc(d.source) + "　🔴漲 🟢跌<br />" +
          "🕒 查詢時間 " + esc(twClock(d.fetchedAt)) + "(台北)" +
          (iz.hasQuote && live ? "<br />⚠ 盤中為即時快照,收盤後可再查核對" : "") +
+         (iz.hasQuote && iz.quoteDate && !quoteIsToday ? "<br />ℹ 即時源目前回傳最近交易日,未補入今日列" : "") +
          "</div>";
 
     h += "</div>";
@@ -478,14 +492,15 @@
 
   function buildLine(d, sepLen) {
     var s = d.stock, iz = d.intraday || {};
-    var live = inTwSession();
+    var quoteIsToday = isTodayQuote(iz);
+    var live = quoteIsToday && inTwSession();
     var n = sepLen || 11;
     var bar = "━".repeat(n);
     var sep = "─".repeat(n);
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
     if (iz.hasQuote) {
-      L.push("📅 " + (live ? "盤中 ⚠️ " : "收盤 ") + (iz.time || "").slice(0, 5));
+      L.push("📅 " + (quoteIsToday ? (live ? "盤中 ⚠️ " : "當日行情 ") : "最近行情 ") + quoteStamp(iz));
       // 用 fmt2 避免 iz.open/iz.price 為 null 時 .toFixed 拋 TypeError
       L.push("開盤 " + fmt2(iz.open) + "  溢價 " +
              sign(iz.premiumPct) + mark(iz.premiumPct));
@@ -509,6 +524,7 @@
     L.push("📡 資料:TWSE / TPEX 官方");
     L.push("🕒 查詢時間 " + twClock(d.fetchedAt) + "(台北)");
     if (iz.hasQuote && live) L.push("⚠️ 盤中為即時快照,收盤後可再查核對");
+    if (iz.hasQuote && iz.quoteDate && !quoteIsToday) L.push("ℹ 即時源目前回傳最近交易日,未補入今日列");
     L.push(bar);
     return L.join("\n");
   }
