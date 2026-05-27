@@ -11,6 +11,11 @@ let SECURITY_CACHE = null;
 let SECURITY_CACHE_TS = 0;
 const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 
+// 盤中即時報價快取:吸收 mis.twse 偶發故障(msgArray 空)導致今日列閃爍消失
+// key: `${marketKey}_${code}` → { ts, intraday }
+const INTRADAY_CACHE = new Map();
+const INTRADAY_TTL = 30 * 1000; // 30 秒
+
 async function httpJson(url, timeoutMs = 10000) {
   // 為外部 API 加上 timeout,避免 TWSE/TPEX 連線懸住時 Express handler 也一直等
   const ctrl = new AbortController();
@@ -116,16 +121,26 @@ async function resolveStock(query) {
     if (info) {
       if (meta) info.market = meta.market;
       if (meta && !info.name) info.name = meta.name;
+      INTRADAY_CACHE.set(`${info.marketKey}_${code}`, {
+        ts: Date.now(),
+        intraday: info.intraday,
+      });
       return info;
     }
   }
+  // probeCode 全部失敗:吃 30 秒快取吸收 mis.twse 偶發故障,避免今日列閃爍
   if (meta) {
+    const cached = INTRADAY_CACHE.get(`${meta.marketKey}_${code}`);
+    const fallbackIntraday =
+      cached && Date.now() - cached.ts < INTRADAY_TTL
+        ? { ...cached.intraday, stale: true }
+        : { hasQuote: false };
     return {
       code,
       name: meta.name,
       market: meta.market,
       marketKey: meta.marketKey,
-      intraday: { hasQuote: false },
+      intraday: fallbackIntraday,
     };
   }
   throw new Error(`找不到代號 ${code} 的個股資料`);
