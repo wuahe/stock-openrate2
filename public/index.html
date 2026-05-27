@@ -331,19 +331,23 @@
   }
 
   // 盤中或當日歷史尚未發佈時,把 intraday 合成成「今天」這列接到 daily 最前面
+  // 只要有開盤價就插入(即使 z 即時價暫時為 null,溢價%仍算得出來)
   function withTodayRow(d) {
     var iz = d.intraday || {};
-    if (!iz.hasQuote) return d.daily;
+    if (iz.open === null || iz.open === undefined) return d.daily;
+    if (iz.prevClose === null || iz.prevClose === undefined) return d.daily;
     var today = twToday();
     if (d.daily.length && d.daily[0].date === today) return d.daily;
-    if (iz.open === null || iz.open === undefined ||
-        iz.price === null || iz.price === undefined) return d.daily;
+    // 收盤欄:優先即時成交價,沒有就退回 high(冷門股撮合間隙時 z 可能空)
+    var closeVal = iz.price;
+    if (closeVal === null || closeVal === undefined) closeVal = iz.high;
+    if (closeVal === null || closeVal === undefined) closeVal = iz.open;
     var row = {
       date: today,
       open: iz.open,
       high: iz.high,
       low: iz.low,
-      close: iz.price,
+      close: closeVal,
       volumeLots: iz.volumeLots || 0,
       prevClose: iz.prevClose,
       premiumPct: iz.premiumPct,
