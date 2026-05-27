@@ -72,7 +72,8 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 | 用途 | 端點 | 備註 |
 |------|------|------|
 | 個股清單(名稱↔代號) | `openapi.twse.com.tw` STOCK_DAY_ALL(上市)+ `tpex.org.tw/openapi`(上櫃) | 模組層 `SECURITY_CACHE` 快取 12 小時 |
-| 盤中即時報價 | `mis.twse.com.tw` getStockInfo.jsp | 含一次重試吸收偶發限流 |
+| 盤中即時報價(主) | Yahoo Finance `query1.finance.yahoo.com/v7/finance/chart/{code}.TW(.TWO)` | 5d range,最後一根 bar 當日 OHLCV + `regularMarketPrice` 當現價 |
+| 盤中即時報價(備) | `mis.twse.com.tw` getStockInfo.jsp | Yahoo 失敗才用;`z` 即時價會短暫為 null,改成「有 open/prev 即顯示」 |
 | 歷史日線 | `twse.com.tw` STOCK_DAY(上市)/ `tpex.org.tw` tradingStock(上櫃) | 回應結構不同,見下 |
 
 ### 關鍵陷阱(改抓取邏輯前必讀)
@@ -82,6 +83,10 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 - **TWSE / TPEX 回應結構不同**:TWSE 資料在 `data.data`,TPEX 可能在 `data.tables[0].data`。
 - **錯誤契約**:`/api/stock` 即使出錯也回 **HTTP 200**,錯誤訊息放在 body 的 `error` 欄位。前端靠 `data.error` 判斷。新增錯誤路徑請維持此約定。
 - **溢價%定義**:`(今開 − 昨收) / 昨收`;漲跌%為 `(今收 − 昨收) / 昨收`。前後端、LINE 版面都依此定義,改動需同步。
+- **Yahoo 反限流**(改 `fetchYahooTwIntraday` 前必讀):Yahoo 對「完整 Chrome UA」會 HTTP 429,**必須用短 UA `Mozilla/5.0`**(`httpJson(url, { ua: "Mozilla/5.0" })`)。不要動 `UA` 常數,那是給 TWSE/TPEX 用的。
+- **Yahoo 浮點雜訊**:Yahoo 回傳是 IEEE 754 原值(`22.149999618530273`),`fetchYahooTwIntraday` 用 `r2 = v => +v.toFixed(2)` 統一四捨五入。
+- **Yahoo 偶爾缺天**:Yahoo `quote.close[i-1]` 可能是 null(如 0050 在某天無資料)。昨收用「從尾巴往前找最近一筆非空 close」,別寫死 `[i-1]`。
+- **漲跌停價計算**:Yahoo 不給 limitUp/limitDown,本地按 `prev*1.10` / `prev*0.90` + 台股 tick rounding(`twTickSize`)計算。漲停 `floor`、跌停 `ceil`(往內收)。
 
 ### 前後端契約
 
