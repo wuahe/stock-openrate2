@@ -376,11 +376,16 @@ function parseIntraday(m) {
 }
 
 // 歷史日線
+// 加整體 deadline:最多回溯 5 個月份,每個 upstream call 預設 10s timeout,
+// 最壞情況會等到 ~50s。改成總預算 15s,逾時剩餘月份直接放棄,handler 不被卡死。
 async function fetchDaily(code, marketKey, days) {
   const today = new Date();
   const rows = [];
   const seen = new Set();
+  const deadline = Date.now() + 15000;
   for (let back = 0; back < 5; back++) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1500) break; // 剩不到 1.5s 就不再發新 request
     let y = today.getFullYear();
     let mth = today.getMonth() + 1 - back;
     while (mth <= 0) {
@@ -402,7 +407,8 @@ async function fetchDaily(code, marketKey, days) {
     }
     let data;
     try {
-      data = await httpJson(url);
+      // 單次 timeout 取「剩餘預算」與「預設 10s」中的較小者,避免最後一輪超出整體 deadline
+      data = await httpJson(url, { timeoutMs: Math.min(remaining, 10000) });
     } catch (e) {
       continue;
     }

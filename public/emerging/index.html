@@ -218,7 +218,13 @@
         status.className = "err";
         status.textContent = "✗ " + data.error;
       } else {
-        status.textContent = "查詢時間 " + new Date(data.fetchedAt).toLocaleString("zh-TW");
+        var stamp = "查詢時間 " + new Date(data.fetchedAt).toLocaleString("zh-TW");
+        if (data.dailyStale) {
+          // Yahoo 連續失敗時退回 24 小時內的舊歷史快取;標示給用戶知道
+          var hrs = Math.round((data.dailyStaleAgeMs || 0) / 3600000);
+          stamp += "  ⚠ 歷史日線為 " + (hrs > 0 ? hrs + " 小時前" : "1 小時內") + "快取(Yahoo 暫時無法連線)";
+        }
+        status.textContent = stamp;
         lastData = data;
         render(data);
       }

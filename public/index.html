@@ -513,7 +513,13 @@
     var sep = "─".repeat(n);
     var L = [bar, "📊 " + s.name + "(" + s.code + ")開盤溢價追蹤",
              "🏛 " + s.market + " ｜ 近 " + d.daily.length + " 日", bar];
-    if (iz.hasQuote) {
+    // 盤中區塊條件與畫面 render 同步:有 hasQuote、或有開盤+昨收+今日標記
+    // 修正:z 短暫為空時,畫面已能顯示今日列,但複製出去的 LINE 卻漏掉
+    var lineShowIntraday = iz.hasQuote ||
+        (iz.open !== null && iz.open !== undefined &&
+         iz.prevClose !== null && iz.prevClose !== undefined &&
+         quoteIsToday);
+    if (lineShowIntraday) {
       L.push("📅 " + (quoteIsToday ? (live ? "盤中 ⚠️ " : "當日行情 ") : "最近行情 ") + quoteStamp(iz));
       // 用 fmt2 避免 iz.open/iz.price 為 null 時 .toFixed 拋 TypeError
       L.push("開盤 " + fmt2(iz.open) + "  溢價 " +

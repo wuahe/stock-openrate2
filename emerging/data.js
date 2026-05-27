@@ -66,6 +66,21 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// 把 ms timestamp 格式化為台北時區 YYYY-MM-DD
+// 與主站 twstock-core.js 同名函式語意一致;興櫃模組刻意自包含所以不共用
+function twDateFromMs(ms) {
+  const p = {};
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Taipei",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ms)).forEach((x) => {
+    p[x.type] = x.value;
+  });
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
 async function loadSnapshot() {
   if (SNAPSHOT_CACHE && Date.now() - SNAPSHOT_CACHE_TS < SNAPSHOT_TTL) {
     return SNAPSHOT_CACHE;
@@ -313,13 +328,9 @@ async function fetchYahooDaily(code) {
     const c = closes[i];
     // Yahoo 對未來日 / 停牌日會放 null,直接過濾
     if (c === null || c === undefined) continue;
-    const d = new Date(ts[i] * 1000);
-    const iso =
-      d.getFullYear() +
-      "-" +
-      String(d.getMonth() + 1).padStart(2, "0") +
-      "-" +
-      String(d.getDate()).padStart(2, "0");
+    // 必須用台北時區格式化:Zeabur 跑在 Tokyo Tencent Cloud,容器多半是 UTC,
+    // 直接用 getFullYear/Month/Date 會被 server timezone 牽走造成日期錯位
+    const iso = twDateFromMs(ts[i] * 1000);
     const volShares = vols[i] || 0;
     rows.push({
       date: iso,
