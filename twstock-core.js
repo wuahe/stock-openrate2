@@ -16,13 +16,16 @@ const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 const INTRADAY_CACHE = new Map();
 const INTRADAY_TTL = 30 * 1000; // 30 秒
 
-async function httpJson(url, timeoutMs = 10000) {
+async function httpJson(url, opts) {
   // 為外部 API 加上 timeout,避免 TWSE/TPEX 連線懸住時 Express handler 也一直等
+  // opts.ua 可改短 UA(Yahoo 對完整 Chrome UA 會 429,要用短 UA)
+  const { ua = UA, timeoutMs = 10000 } =
+    typeof opts === "number" ? { timeoutMs: opts } : opts || {};
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": UA },
+      headers: { "User-Agent": ua },
       signal: ctrl.signal,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -115,35 +118,148 @@ async function resolveStock(query) {
   if (!code) throw new Error(`找不到「${query}」,請改用 4 位股票代號查詢`);
 
   const meta = table[code];
-  const markets = meta ? [meta.marketKey] : ["tse", "otc"];
-  for (const mkt of markets) {
-    const info = await probeCode(code, mkt);
-    if (info) {
-      if (meta) info.market = meta.market;
-      if (meta && !info.name) info.name = meta.name;
-      INTRADAY_CACHE.set(`${info.marketKey}_${code}`, {
-        ts: Date.now(),
-        intraday: info.intraday,
-      });
-      return info;
-    }
-  }
-  // probeCode 全部失敗:吃 30 秒快取吸收 mis.twse 偶發故障,避免今日列閃爍
+  // 常見路徑:meta 命中,用 Yahoo 抓盤中(比 mis.twse 穩,不會出現 z 短暫為 null)
   if (meta) {
-    const cached = INTRADAY_CACHE.get(`${meta.marketKey}_${code}`);
-    const fallbackIntraday =
-      cached && Date.now() - cached.ts < INTRADAY_TTL
-        ? { ...cached.intraday, stale: true }
-        : { hasQuote: false };
+    let intraday;
+    try {
+      intraday = await fetchYahooTwIntraday(code, meta.marketKey);
+    } catch (e) {
+      intraday = null;
+    }
+    // Yahoo 失敗時退回 mis.twse,再失敗才吃 30 秒快取
+    if (!intraday || !intraday.hasQuote) {
+      const probed = await probeCode(code, meta.marketKey);
+      if (probed) intraday = probed.intraday;
+    }
+    if (!intraday || !intraday.hasQuote) {
+      const cached = INTRADAY_CACHE.get(`${meta.marketKey}_${code}`);
+      intraday =
+        cached && Date.now() - cached.ts < INTRADAY_TTL
+          ? { ...cached.intraday, stale: true }
+          : intraday || { hasQuote: false };
+    }
+    if (intraday && intraday.hasQuote) {
+      INTRADAY_CACHE.set(`${meta.marketKey}_${code}`, {
+        ts: Date.now(),
+        intraday,
+      });
+    }
     return {
       code,
       name: meta.name,
       market: meta.market,
       marketKey: meta.marketKey,
-      intraday: fallbackIntraday,
+      intraday,
     };
   }
+  // 邊緣路徑:meta 沒命中(可能是清單還沒重抓),用 probeCode 嗅探兩個市場
+  for (const mkt of ["tse", "otc"]) {
+    const info = await probeCode(code, mkt);
+    if (info) {
+      try {
+        const yahoo = await fetchYahooTwIntraday(code, mkt);
+        if (yahoo && yahoo.hasQuote) info.intraday = yahoo;
+      } catch (e) {
+        /* 用 probeCode 的 intraday 兜底 */
+      }
+      return info;
+    }
+  }
   throw new Error(`找不到代號 ${code} 的個股資料`);
+}
+
+// 台股 tick size(漲跌停價會被截到合法 tick)
+function twTickSize(p) {
+  if (p < 10) return 0.01;
+  if (p < 50) return 0.05;
+  if (p < 100) return 0.1;
+  if (p < 500) return 0.5;
+  if (p < 1000) return 1;
+  return 5;
+}
+
+// 漲停價 = floor(prev*1.10 / tick) * tick;跌停價 = ceil(prev*0.9 / tick) * tick
+function twLimitPrice(prev, isUpper) {
+  if (!prev) return null;
+  const raw = prev * (isUpper ? 1.10 : 0.90);
+  const tick = twTickSize(raw);
+  const v = isUpper ? Math.floor(raw / tick) * tick : Math.ceil(raw / tick) * tick;
+  return +v.toFixed(2);
+}
+
+// Yahoo Finance chart API — 比 mis.twse 穩定,當日 bar 含 o/h/l/c/v + regularMarketPrice
+// 上市用 .TW、上櫃用 .TWO。Yahoo 對完整 Chrome UA 會 429,必須用短 UA。
+async function fetchYahooTwIntraday(code, marketKey) {
+  const suffix = marketKey === "tse" ? ".TW" : ".TWO";
+  const url =
+    "https://query1.finance.yahoo.com/v7/finance/chart/" +
+    `${code}${suffix}?range=5d&interval=1d`;
+  const data = await httpJson(url, { ua: "Mozilla/5.0" });
+  const r = data && data.chart && data.chart.result && data.chart.result[0];
+  if (!r) return { hasQuote: false };
+  const meta = r.meta || {};
+  const ts = r.timestamp || [];
+  const q = (r.indicators && r.indicators.quote && r.indicators.quote[0]) || {};
+  const n = ts.length;
+  if (!n) return { hasQuote: false };
+  // Yahoo 回傳是 IEEE 754 雜訊(22.149999618530273),要四捨五入到 2 位
+  const r2 = (v) => (v === null ? null : +v.toFixed(2));
+  const i = n - 1;
+  const open = r2(num(q.open && q.open[i]));
+  const high = r2(num(q.high && q.high[i]));
+  const low = r2(num(q.low && q.low[i]));
+  const lastClose = r2(num(q.close && q.close[i]));
+  // 盤中即時價優先用 regularMarketPrice,沒有就退回 last bar 的 close
+  let price = r2(num(meta.regularMarketPrice));
+  if (price === null) price = lastClose;
+  // 昨收:從尾巴 i-1 往前找最近一筆非空 close(Yahoo 偶爾會缺某天)
+  // 找不到才退回 chartPreviousClose(這個是 range 起點再往前的那一天,可能差很多天)
+  let prev = null;
+  for (let j = i - 1; j >= 0; j--) {
+    const c = num(q.close && q.close[j]);
+    if (c !== null) {
+      prev = r2(c);
+      break;
+    }
+  }
+  if (prev === null) prev = r2(num(meta.chartPreviousClose));
+  const vol = num(q.volume && q.volume[i]) || 0;
+  // Yahoo 成交量單位是「股」,轉「張」
+  const volumeLots = Math.round(vol / 1000);
+  // 台北時間 HH:MM:SS
+  const tMs = ((meta.regularMarketTime || ts[i]) || 0) * 1000;
+  const time = tMs
+    ? new Date(tMs).toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Taipei",
+        hour12: false,
+      })
+    : "";
+  const limitUp = twLimitPrice(prev, true);
+  const limitDown = twLimitPrice(prev, false);
+  const out = {
+    time,
+    price,
+    open,
+    high,
+    low,
+    prevClose: prev,
+    volumeLots,
+    limitUp,
+    limitDown,
+    hasQuote: price !== null,
+  };
+  if (price !== null && prev) {
+    out.change = +(price - prev).toFixed(2);
+    out.changePct = +(((price - prev) / prev) * 100).toFixed(2);
+  }
+  if (open !== null && prev) {
+    out.premiumPct = +(((open - prev) / prev) * 100).toFixed(2);
+  }
+  out.limitLocked =
+    price !== null &&
+    ((limitUp !== null && Math.abs(price - limitUp) < 0.001) ||
+      (limitDown !== null && Math.abs(price - limitDown) < 0.001));
+  return out;
 }
 
 // 盤中即時報價(含一次重試,吸收偶發限流)
