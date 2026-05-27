@@ -11,8 +11,14 @@ const emergingRouter = require("./emerging/router");
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// 靜態網頁
-app.use(express.static(path.join(__dirname, "public")));
+// 靜態網頁:HTML 一律不快取,避免使用者抱著舊頁。其他資源沿用預設 ETag。
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, p) => {
+    if (p.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-store, must-revalidate");
+    }
+  },
+}));
 
 // 興櫃子模組(靜態 /emerging/* 與 /api/emerging)
 app.use(emergingRouter);
@@ -52,6 +58,7 @@ app.get("/api/stock", async (req, res) => {
 
 // 其餘路徑一律回首頁(單頁應用)
 app.get("*", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, must-revalidate");
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
