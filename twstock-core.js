@@ -194,7 +194,11 @@ async function resolveStock(query) {
     if (info) {
       try {
         const yahoo = await fetchYahooTwIntraday(code, mkt);
-        if (yahoo && yahoo.hasQuote) info.intraday = yahoo;
+        // 只在 Yahoo 是今天資料、或 probeCode 本來就不是今天時才覆寫,
+        // 避免 Yahoo 延遲快照蓋掉 mis.twse 的今日資料
+        if (yahoo && (isTodayIntraday(yahoo) || !isTodayIntraday(info.intraday))) {
+          info.intraday = yahoo;
+        }
       } catch (e) {
         /* 用 probeCode 的 intraday 兜底 */
       }
