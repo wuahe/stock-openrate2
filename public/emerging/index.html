@@ -59,8 +59,15 @@
   .hint { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
   .hint span { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; }
 
-  #status { margin: 18px 0; font-size: 13px; color: var(--ink-dim); }
+  #status { margin: 18px 0; font-size: 13px; color: var(--ink-dim); text-align: center; }
   #status.err { color: var(--up); }
+  .spin {
+    width: 22px; height: 22px; margin: 0 auto 10px;
+    border: 2px solid var(--line); border-top-color: var(--gold);
+    border-radius: 50%; animation: r 0.7s linear infinite;
+    display: block;
+  }
+  @keyframes r { to { transform: rotate(360deg); } }
 
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-top: 14px; }
   .card h2 { font-size: 13px; font-weight: 700; color: var(--ink-dim); letter-spacing: .1em; text-transform: uppercase; margin-bottom: 12px; }
@@ -161,7 +168,13 @@
     DAYS = parseInt(b.dataset.d, 10);
     Array.prototype.forEach.call(seg.children, function (c) { c.classList.remove("on"); });
     b.classList.add("on");
-    var q = document.getElementById("q").value.trim();
+    // 若輸入框被清空,沿用上次查詢的代號(與主頁邏輯一致)
+    var input = document.getElementById("q");
+    var q = input.value.trim();
+    if (!q && lastData && lastData.stock && lastData.stock.code) {
+      input.value = lastData.stock.code;
+      q = lastData.stock.code;
+    }
     if (q) run();
   });
 
@@ -208,7 +221,7 @@
     var result = document.getElementById("result");
     var btn = document.getElementById("go");
     status.className = "";
-    status.textContent = "查詢中…";
+    status.innerHTML = '<div class="spin"></div>抓取興櫃資料中…';
     result.innerHTML = "";
     btn.disabled = true;
     try {
