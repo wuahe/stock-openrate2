@@ -2,7 +2,7 @@
 // 掛載方式:在 server.js 用 app.use(require("./emerging/router"))
 // 提供:
 //   GET  /api/emerging?q=<代號或名稱>&days=<1-240>
-//   靜態 /emerging/*  -> public/emerging/
+//   GET  /emerging/*  SPA fallback(不存在的子路徑停在興櫃頁,不被導回主頁)
 
 const express = require("express");
 const path = require("path");
@@ -10,13 +10,9 @@ const { resolveEmerging, fetchYahooDaily, compute } = require("./data");
 
 const router = express.Router();
 
-router.use(
-  "/emerging",
-  express.static(path.join(__dirname, "..", "public", "emerging"))
-);
-
+// 興櫃 API(同源使用,不開放跨域)。
+// /emerging/* 靜態檔由 server.js 的 express.static('public') 涵蓋,這裡不重覆掛。
 router.get("/api/emerging", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   try {
     const q = (req.query.q || "").toString();
     let days = parseInt((req.query.days || "30").toString(), 10);
@@ -41,6 +37,13 @@ router.get("/api/emerging", async (req, res) => {
     // 與主站相同契約:錯誤也回 200,body 含 error
     res.json({ error: e.message || String(e) });
   }
+});
+
+// SPA fallback:/emerging/xyz 等不存在子路徑停在興櫃頁(不被主站 * 兜底拉回上市櫃首頁)
+// 注意:必須掛在 server.js 的 app.get("*") 之前才會被命中(目前已是)
+router.get("/emerging/*", (req, res) => {
+  res.setHeader("Cache-Control", "no-store, must-revalidate");
+  res.sendFile(path.join(__dirname, "..", "public", "emerging", "index.html"));
 });
 
 module.exports = router;

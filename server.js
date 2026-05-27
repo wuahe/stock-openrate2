@@ -26,9 +26,8 @@ app.use(emergingRouter);
 // 健康檢查(Zeabur 會用得到)
 app.get("/healthz", (req, res) => res.json({ ok: true }));
 
-// 個股查詢 API
+// 個股查詢 API(同源使用,不開放跨域)
 app.get("/api/stock", async (req, res) => {
-  res.set("Access-Control-Allow-Origin", "*");
   try {
     const q = (req.query.q || "").toString();
     let days = parseInt((req.query.days || "10").toString(), 10);
