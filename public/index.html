@@ -320,6 +320,39 @@
     return mins >= 540 && mins < 810;
   }
 
+  // 台北時間的今日 YYYY-MM-DD
+  function twToday() {
+    var p = {};
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei",
+      year: "numeric", month: "2-digit", day: "2-digit"
+    }).formatToParts(new Date()).forEach(function (x) { p[x.type] = x.value; });
+    return p.year + "-" + p.month + "-" + p.day;
+  }
+
+  // 盤中或當日歷史尚未發佈時,把 intraday 合成成「今天」這列接到 daily 最前面
+  function withTodayRow(d) {
+    var iz = d.intraday || {};
+    if (!iz.hasQuote) return d.daily;
+    var today = twToday();
+    if (d.daily.length && d.daily[0].date === today) return d.daily;
+    if (iz.open === null || iz.open === undefined ||
+        iz.price === null || iz.price === undefined) return d.daily;
+    var row = {
+      date: today,
+      open: iz.open,
+      high: iz.high,
+      low: iz.low,
+      close: iz.price,
+      volumeLots: iz.volumeLots || 0,
+      prevClose: iz.prevClose,
+      premiumPct: iz.premiumPct,
+      changePct: iz.changePct,
+      _intraday: true
+    };
+    return [row].concat(d.daily);
+  }
+
   // 把 ISO 時間(或現在)格式化為台北時間 MM/DD HH:MM
   function twClock(iso) {
     var d = iso ? new Date(iso) : new Date();
@@ -402,12 +435,14 @@
            "<span>量 " + fmtVol(iz.volumeLots || 0) + "張</span></div></div>";
     }
 
+    var rows = withTodayRow(d);
     h += '<div class="tablewrap"><table><thead><tr>' +
          "<th>日期</th><th>開盤</th><th>溢價%</th>" +
          "<th>漲跌%</th><th>收盤</th><th>量(張)</th>" +
          "</tr></thead><tbody>";
-    d.daily.forEach(function (r) {
-      h += "<tr><td>" + esc(md(r.date)) + "</td>" +
+    rows.forEach(function (r) {
+      h += "<tr><td>" + esc(md(r.date)) +
+           (r._intraday ? (live ? " ⚠" : " 🏁") : "") + "</td>" +
            "<td>" + fmt2(r.open) + "</td>" +
            '<td class="' + cls(r.premiumPct) + '">' + sign(r.premiumPct) + "</td>" +
            '<td class="' + cls(r.changePct) + '">' + sign(r.changePct) + "</td>" +
