@@ -437,7 +437,13 @@
          "<code>" + esc(s.code) + "</code></div>" +
          '<div class="meta">' + esc(s.market) + " ｜ 近 " + d.daily.length + " 日</div></div>";
 
-    if (iz.hasQuote) {
+    // 盤中即時方塊的顯示條件與表格今日列同步,避免「有今日列卻沒方塊」的視覺斷層
+    // 條件:有 hasQuote(即時成交價)、或有開盤+昨收+今日標記(可算溢價)
+    var showIntraday = iz.hasQuote ||
+        (iz.open !== null && iz.open !== undefined &&
+         iz.prevClose !== null && iz.prevClose !== undefined &&
+         quoteIsToday);
+    if (showIntraday) {
       h += '<div class="intraday"><div class="tag">' +
            (quoteIsToday ? (live ? "⚠ 盤中即時 " : "🏁 當日行情 ") : "↺ 最近行情 ") +
            esc(quoteStamp(iz)) + (iz.stale ? " · 快取" : "") + "</div>" +
