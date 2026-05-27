@@ -15,10 +15,13 @@ let SNAPSHOT_CACHE = null;
 let SNAPSHOT_CACHE_TS = 0;
 const SNAPSHOT_TTL = 60 * 1000; // 即時資料快取 60 秒,避免過度打 API
 
-// Yahoo 歷史日線 cache:每檔股一份,TTL 1 小時
-// 興櫃日線盤後才變動,1 小時夠避免重覆抓取同時避開 Yahoo 限流
+// Yahoo 歷史日線 cache:每檔股一份
+// fresh TTL 1 小時(命中直接回);stale TTL 24 小時(Yahoo 失敗時可兜底)
+// 興櫃日線盤後才變動,一小時夠避免重覆抓取又能避開 Yahoo 限流
+// 24 小時 stale 窗:即使連續 429 整個下午,還是能回昨日資料給使用者
 const YAHOO_CACHE = new Map();
 const YAHOO_TTL = 60 * 60 * 1000;
+const YAHOO_STALE_TTL = 24 * 60 * 60 * 1000;
 
 async function httpJson(url, opts) {
   const { retries = 0, retryDelay = 500, ua = UA, timeoutMs = 10000 } = opts || {};
@@ -47,7 +50,11 @@ async function httpJson(url, opts) {
       clearTimeout(tid);
     }
     if (attempt < retries) {
-      await new Promise((r) => setTimeout(r, retryDelay * (attempt + 1)));
+      // 指數退讓 + jitter,避免多用戶同時重試把 Yahoo 撞死
+      // base = retryDelay * (attempt+1),再疊 0.5x~1.5x 隨機抖動
+      const base = retryDelay * (attempt + 1);
+      const delay = base * (0.5 + Math.random());
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
   throw lastErr;
@@ -260,10 +267,11 @@ function formatTime(t) {
 }
 
 async function fetchYahooDaily(code) {
-  // 先查 cache:命中就直接回,Yahoo 完全不打
+  // 先查 cache:fresh 命中就直接回,Yahoo 完全不打
   const cached = YAHOO_CACHE.get(code);
-  if (cached && Date.now() - cached.ts < YAHOO_TTL) {
-    return cached.rows;
+  const now = Date.now();
+  if (cached && now - cached.ts < YAHOO_TTL) {
+    return { rows: cached.rows, stale: false, staleAgeMs: 0 };
   }
   // Yahoo Finance chart API。range=1y 給 ~243 個交易日,興櫃股 .TWO 後綴可用。
   // 若新掛牌股不足一年,Yahoo 會自動截到 IPO 日。
@@ -271,13 +279,28 @@ async function fetchYahooDaily(code) {
     "https://query1.finance.yahoo.com/v7/finance/chart/" +
     `${code}.TWO?range=1y&interval=1d`;
   // Yahoo 對「完整 Chrome UA」會限流(視為機器人),改用最短 UA 反而 OK。
-  const data = await httpJson(url, {
-    ua: "Mozilla/5.0",
-    retries: 2,
-    retryDelay: 1000,
-  });
+  // retries 4 次撐過 Yahoo 短期 burst limit(總共最多 ~10 秒)
+  let data;
+  try {
+    data = await httpJson(url, {
+      ua: "Mozilla/5.0",
+      retries: 4,
+      retryDelay: 1000,
+    });
+  } catch (e) {
+    // Yahoo 連續失敗:若快取還在 24 小時 stale 窗內,回舊資料 + 標記
+    // 寧可顯示「昨日資料」也別整個查詢失敗
+    if (cached && now - cached.ts < YAHOO_STALE_TTL) {
+      return {
+        rows: cached.rows,
+        stale: true,
+        staleAgeMs: now - cached.ts,
+      };
+    }
+    throw e;
+  }
   const result = (data.chart && data.chart.result && data.chart.result[0]) || null;
-  if (!result) return [];
+  if (!result) return { rows: [], stale: false, staleAgeMs: 0 };
   const ts = result.timestamp || [];
   const quote = (result.indicators && result.indicators.quote && result.indicators.quote[0]) || {};
   const opens = quote.open || [];
@@ -310,7 +333,7 @@ async function fetchYahooDaily(code) {
   // Yahoo 給的是舊→新,我們要新→舊(與既有 compute 與前端表格一致)
   rows.sort((a, b) => (a.date < b.date ? 1 : -1));
   YAHOO_CACHE.set(code, { ts: Date.now(), rows });
-  return rows;
+  return { rows, stale: false, staleAgeMs: 0 };
 }
 
 function round2(n) {
