@@ -349,18 +349,10 @@
     if (!isTodayQuote(iz)) return d.daily;
     var today = twToday();
     if (d.daily.length && d.daily[0].date === today) return d.daily;
-    // 收盤欄:優先即時成交價,沒有就退回 high(撮合間隙時 z 可能空)
-    var closeVal = iz.price;
-    if (closeVal === null || closeVal === undefined) closeVal = iz.high;
-    if (closeVal === null || closeVal === undefined) closeVal = iz.open;
-    // 漲跌%:後端只在有 z 時算,z 為空時用上面兜底的 close 重算,
-    // 避免「收盤有值、漲跌% 卻是 —」的不一致顯示
-    var changePct = iz.changePct;
-    if ((changePct === null || changePct === undefined) &&
-        closeVal !== null && closeVal !== undefined &&
-        iz.prevClose) {
-      changePct = +(((closeVal - iz.prevClose) / iz.prevClose) * 100).toFixed(2);
-    }
+    // 收盤欄只能放即時成交價;不可拿 high 當收(那是當日最高,會把 +0.69% 寫成 +7.34%)
+    // 即時源缺價時,close 與漲跌% 一起留空,讓表格顯示 —,使用者仍看得到開盤+溢價%
+    var closeVal = (iz.price === null || iz.price === undefined) ? null : iz.price;
+    var changePct = (iz.changePct === null || iz.changePct === undefined) ? null : iz.changePct;
     var row = {
       date: today,
       open: iz.open,
