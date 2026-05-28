@@ -1,13 +1,38 @@
-# 台股開盤溢價追蹤 — Zeabur 版
+# 台股開盤溢價追蹤
 
-查詢台股(上市/上櫃)個股近 N 日的開盤溢價%、漲跌%、收盤與成交量,
-附盤中即時報價,輸出 LINE 友善版面。零 AI、零金鑰。
+一個免金鑰、可自行部署的台股資料整理小工具。輸入股票名稱或代號後,可以查詢
+上市/上櫃個股近 N 日的開盤溢價%、漲跌%、收盤價、成交量,並附上盤中即時行情與
+Yahoo 股價連結,方便快速複製到 LINE 或交給 AI App 做後續整理。
 
-**興櫃股**另立子頁(`/emerging`):因議價市場無開盤集合競價,改追**收盤漲跌%** 與
-**量比**(當日張數 ÷ 近 20 日均量),用真即時 mis.tpex 取代延遲快照,
-歷史日線取 Yahoo Finance(最長 ~243 個交易日)。
+> 本工具僅作公開資料整理與呈現,不構成投資建議。
 
-資料來源:TWSE / TPEX 官方公開端點 + Yahoo Finance(僅興櫃歷史)。
+## 功能特色
+
+- **上市/上櫃追蹤**:開盤溢價%、收盤漲跌%、收盤價、成交量與盤中即時行情。
+- **興櫃追蹤**:因興櫃為議價市場,不計開盤溢價,改追收盤漲跌%、量比與買賣價差。
+- **快速分享**:一鍵複製 LINE 版面,或打包成適合貼到 Claude / Gemini App 的文字。
+- **零後端金鑰**:資料取自公開端點,不需要申請 API key。
+- **可自行部署**:Node.js + Express,適合部署到 Zeabur、Render、Fly.io 或自己的主機。
+- **GitHub 開源友善**:結構簡單、依賴少,方便 fork、修改與部署。
+
+## Demo 與截圖
+
+若你已部署到 Zeabur 或其他平台,可在本段補上公開網址。建議也可以加上一張首頁截圖,
+讓訪客一眼看懂畫面與用途。
+
+## 資料來源
+
+| 用途 | 來源 |
+|---|---|
+| 上市個股清單 | TWSE 官方公開端點 |
+| 上櫃個股清單 | TPEX 官方公開端點 |
+| 上市/上櫃歷史日線 | TWSE / TPEX 官方公開端點 |
+| 上市/上櫃盤中行情 | Yahoo Finance,必要時 fallback 到 TWSE mis |
+| 興櫃即時行情 | TPEX mis.tpex GETQ20 |
+| 興櫃歷史日線 | Yahoo Finance |
+
+外部公開端點可能因限流、維護、欄位調整而暫時失效。本專案已加入 timeout、快取與部分
+fallback,但不保證資料即時性或完整性。
 
 ## 路由
 
@@ -38,42 +63,69 @@ twstock-zeabur/
 刪掉興櫃功能很乾淨:刪 `emerging/`、`public/emerging/`、`server.js` 內 `emergingRouter`
 引用兩行、`public/index.html` 的導覽連結即可。
 
-## 本機執行
+## 快速開始
 
 ```bash
+git clone https://github.com/wuahe/stock-openrate2.git
+cd stock-openrate2
 npm install
 npm start
 # 開 http://localhost:8080
 ```
 
-## 推上 GitHub(樞紐步驟)
+需求:
 
-GitHub repo 是中樞:Claude Code、Zeabur、你的 Mac 都連到它。
+- Node.js 18 或更新版本
+- npm
+
+## API 範例
+
+上市/上櫃:
 
 ```bash
-cd twstock-zeabur
-git init
-git add .
-git commit -m "init: 台股開盤溢價追蹤 Zeabur 版"
-# 在 GitHub 開一個新的空 repo,取得網址後:
-git remote add origin https://github.com/<你的帳號>/<repo名>.git
-git branch -M main
-git push -u origin main
+curl "http://localhost:8080/api/stock?q=2330&days=10"
+curl "http://localhost:8080/api/stock?q=健亞&days=20"
 ```
 
-## 連 Claude Code(App 左上的 Code 分頁)
+興櫃:
 
-App → Code 分頁 → 連結上面這個 GitHub repo。
-之後就能在 Code 分頁裡請 Claude Code 修改此專案,改完自動 commit / push。
+```bash
+curl "http://localhost:8080/api/emerging?q=7832&days=30"
+```
+
+錯誤回應仍使用 HTTP 200,並在 JSON body 放入 `error` 欄位。這是前後端既有契約。
 
 ## 部署到 Zeabur
 
-1. 登入 https://zeabur.com
-2. New Project → Deploy from GitHub → 選同一個 repo
-3. Zeabur 偵測到 package.json,自動以 `npm start` 啟動
-4. 在 Networking 設定產生網域,即得公開網址
+1. Fork 或 clone 本專案到自己的 GitHub 帳號。
+2. 登入 https://zeabur.com
+3. New Project → Deploy from GitHub → 選擇這個 repo
+4. Zeabur 偵測到 `package.json`,自動以 `npm start` 啟動
+5. 在 Networking 設定產生網域,即得公開網址
 
 之後每次 push 到 GitHub,Zeabur 會自動重新部署。
+
+## 開源使用
+
+歡迎 fork 後依自己的需求調整,例如:
+
+- 更換快捷股票清單
+- 調整追蹤天數
+- 改成自己的部署平台
+- 增加更多資料欄位或視覺化圖表
+- 改寫成其他前端框架版本
+
+若要正式作為開源專案發布,建議在 repo 內新增 `LICENSE` 檔案。常見選擇是 MIT License,
+方便他人使用、修改與再散布；若你希望限制商業使用,則應改選其他授權。
+
+## 貢獻方式
+
+歡迎開 issue 或 pull request。送 PR 前建議先確認:
+
+- 不要加入任何私人金鑰、cookie 或個人帳號資料。
+- 外部資料源欄位若有變動,請在 PR 說明中附上來源與測試方式。
+- 修改資料計算邏輯時,請同步更新 README 或 `CLAUDE.md` 的維護筆記。
+- 保留「不構成投資建議」的免責說明。
 
 ## iPhone 主畫面
 
