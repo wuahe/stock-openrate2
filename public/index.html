@@ -127,6 +127,16 @@
     font-size: 12px; color: var(--ink-dim); margin-top: 4px;
     font-family: "JetBrains Mono", monospace;
   }
+  .quote-link {
+    margin: 12px 14px 0; font-size: 12px;
+    color: var(--ink-dim); line-height: 1.5;
+    word-break: break-all;
+  }
+  .quote-link a {
+    color: var(--gold); text-decoration: none;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .quote-link a:hover { text-decoration: underline; }
 
   .intraday {
     margin: 14px 14px 0; padding: 14px;
@@ -427,6 +437,11 @@
     return (n == null || !isFinite(n)) ? "—" : Number(n).toFixed(2);
   }
 
+  function yahooQuoteUrl(s) {
+    var suffix = s.market === "上櫃" ? "TWO" : "TW";
+    return "https://tw.stock.yahoo.com/quote/" + encodeURIComponent(s.code + "." + suffix);
+  }
+
   function render(d) {
     var s = d.stock, iz = d.intraday || {};
     var quoteIsToday = isTodayQuote(iz);
@@ -436,6 +451,10 @@
     h += '<div class="stockhead"><div class="nm">' + esc(s.name) +
          "<code>" + esc(s.code) + "</code></div>" +
          '<div class="meta">' + esc(s.market) + " ｜ 近 " + d.daily.length + " 日</div></div>";
+
+    var yahooUrl = yahooQuoteUrl(s);
+    h += '<div class="quote-link">Yahoo 股價：<a href="' + esc(yahooUrl) +
+         '" target="_blank" rel="noopener noreferrer">' + esc(yahooUrl) + "</a></div>";
 
     // 盤中即時方塊的顯示條件與表格今日列同步,避免「有今日列卻沒方塊」的視覺斷層
     // 條件:有 hasQuote(即時成交價)、或有開盤+昨收+今日標記(可算溢價)

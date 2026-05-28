@@ -75,6 +75,16 @@
   .stock-title .code { font-family: "JetBrains Mono", monospace; color: var(--gold); font-size: 22px; font-weight: 700; }
   .stock-title .name { font-size: 18px; font-weight: 700; }
   .stock-title .badge { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-dim); }
+  .quote-link {
+    margin-top: 10px; font-size: 12px;
+    color: var(--ink-dim); line-height: 1.5;
+    word-break: break-all;
+  }
+  .quote-link a {
+    color: var(--gold); text-decoration: none;
+    font-family: "JetBrains Mono", monospace;
+  }
+  .quote-link a:hover { text-decoration: underline; }
 
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 12px; }
   .grid .k { font-size: 11px; color: var(--ink-dim); }
@@ -213,6 +223,9 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
+  function yahooQuoteUrl(s) {
+    return "https://tw.stock.yahoo.com/quote/" + encodeURIComponent(s.code + ".TWO");
+  }
 
   async function run() {
     var q = document.getElementById("q").value.trim();
@@ -273,6 +286,9 @@
     html += '<span class="name">' + esc(s.name) + '</span>';
     html += '<span class="badge">' + esc(s.market) + '</span>';
     html += '</div>';
+    var yahooUrl = yahooQuoteUrl(s);
+    html += '<div class="quote-link">Yahoo 股價：<a href="' + esc(yahooUrl) +
+      '" target="_blank" rel="noopener noreferrer">' + esc(yahooUrl) + '</a></div>';
 
     // 即時報價
     html += '<h2 style="margin-top:14px">即時報價</h2>';
