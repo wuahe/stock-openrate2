@@ -249,6 +249,8 @@
           // Yahoo 連續失敗時退回 24 小時內的舊歷史快取;標示給用戶知道
           var hrs = Math.round((data.dailyStaleAgeMs || 0) / 3600000);
           stamp += "  ⚠ 歷史日線為 " + (hrs > 0 ? hrs + " 小時前" : "1 小時內") + "快取(Yahoo 暫時無法連線)";
+        } else if (data.dailyUnavailable) {
+          stamp += "  ⚠ 歷史日線暫時無法取得(Yahoo 限流),先顯示即時報價";
         }
         status.textContent = stamp;
         lastData = data;
@@ -329,23 +331,28 @@
     // 歷史日線
     html += '<div class="card">';
     html += '<h2>歷史日線(' + daily.length + ' 個交易日)</h2>';
-    html += '<table><thead><tr>';
-    html += '<th class="date">日期</th><th>收盤</th><th>漲跌%</th><th>高</th><th>低</th><th>張數</th><th>量比</th>';
-    html += '</tr></thead><tbody>';
-    daily.forEach(function (d) {
-      var vrCls = (d.volumeRatio && d.volumeRatio >= 3) ? 'vr-high' : '';
-      html += '<tr>';
-      html += '<td class="date">' + esc(d.date.slice(5)) + '</td>';
-      html += '<td>' + fmt(d.close) + '</td>';
-      html += '<td class="' + cls(d.changePct) + '">' + fmtPct(d.changePct) + '</td>';
-      html += '<td>' + fmt(d.high) + '</td>';
-      html += '<td>' + fmt(d.low) + '</td>';
-      html += '<td>' + fmtInt(d.volumeLots) + '</td>';
-      html += '<td class="' + vrCls + '">' + (d.volumeRatio ? fmt(d.volumeRatio) + 'x' : '—') + '</td>';
-      html += '</tr>';
-    });
-    html += '</tbody></table>';
-    html += '<div style="font-size:11px;color:var(--ink-dim);margin-top:10px">量比 = 當日張數 ÷ 過去 20 日均量,≥3x 標金色 = 異常放量。漲跌% = 收盤對昨收</div>';
+    if (data.dailyUnavailable) {
+      html += '<div class="alert"><strong>歷史日線暫時無法取得</strong><br>';
+      html += 'Yahoo Finance 目前回應 ' + esc(data.dailyError || '限流') + ',請稍後再查。即時報價仍可參考。</div>';
+    } else {
+      html += '<table><thead><tr>';
+      html += '<th class="date">日期</th><th>收盤</th><th>漲跌%</th><th>高</th><th>低</th><th>張數</th><th>量比</th>';
+      html += '</tr></thead><tbody>';
+      daily.forEach(function (d) {
+        var vrCls = (d.volumeRatio && d.volumeRatio >= 3) ? 'vr-high' : '';
+        html += '<tr>';
+        html += '<td class="date">' + esc(d.date.slice(5)) + '</td>';
+        html += '<td>' + fmt(d.close) + '</td>';
+        html += '<td class="' + cls(d.changePct) + '">' + fmtPct(d.changePct) + '</td>';
+        html += '<td>' + fmt(d.high) + '</td>';
+        html += '<td>' + fmt(d.low) + '</td>';
+        html += '<td>' + fmtInt(d.volumeLots) + '</td>';
+        html += '<td class="' + vrCls + '">' + (d.volumeRatio ? fmt(d.volumeRatio) + 'x' : '—') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      html += '<div style="font-size:11px;color:var(--ink-dim);margin-top:10px">量比 = 當日張數 ÷ 過去 20 日均量,≥3x 標金色 = 異常放量。漲跌% = 收盤對昨收</div>';
+    }
     html += '</div>';
 
     html += '<div class="actions">';

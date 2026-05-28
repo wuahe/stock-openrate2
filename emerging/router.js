@@ -20,7 +20,14 @@ router.get("/api/emerging", async (req, res) => {
     if (days > 240) days = 240; // Yahoo range=1y 約 243 個交易日
 
     const info = await resolveEmerging(q);
-    const yahoo = await fetchYahooDaily(info.code);
+    let yahoo;
+    let dailyError = "";
+    try {
+      yahoo = await fetchYahooDaily(info.code);
+    } catch (e) {
+      yahoo = { rows: [], stale: false, staleAgeMs: 0 };
+      dailyError = e.message || String(e);
+    }
     const daily = compute(yahoo.rows, days);
 
     res.json({
@@ -30,6 +37,8 @@ router.get("/api/emerging", async (req, res) => {
       // 歷史資料來源延遲(Yahoo 連續失敗時用昨日快取);前端可據此顯示提示
       dailyStale: yahoo.stale || false,
       dailyStaleAgeMs: yahoo.staleAgeMs || 0,
+      dailyUnavailable: !!dailyError,
+      dailyError,
       fetchedAt: new Date().toISOString(),
       source: "即時:mis.tpex (真即時)｜歷史:Yahoo Finance",
     });
