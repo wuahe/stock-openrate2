@@ -7,8 +7,9 @@ const UA =
   "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 // 個股清單快取(函式實例存活期間有效,降低重複抓取)
-let SECURITY_CACHE = null;
-let SECURITY_CACHE_TS = 0;
+// 上市/上櫃分開快取,避免其中一個來源短暫失敗時把「半套清單」凍住 12 小時。
+const SECURITY_CACHE = { tse: null, otc: null };
+const SECURITY_CACHE_TS = { tse: 0, otc: 0 };
 const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 
 // 盤中即時報價快取:吸收 mis.twse 偶發故障(msgArray 空)導致今日列閃爍消失
@@ -89,16 +90,30 @@ function isTodayIntraday(intraday) {
 
 // ---- 個股清單:名稱 <-> 代號 ----
 async function loadSecurityTable() {
-  if (SECURITY_CACHE && Date.now() - SECURITY_CACHE_TS < NAME_TTL) {
-    return SECURITY_CACHE;
-  }
+  const now = Date.now();
   const table = {};
+  const useCachedTse = SECURITY_CACHE.tse && now - SECURITY_CACHE_TS.tse < NAME_TTL;
+  const useCachedOtc = SECURITY_CACHE.otc && now - SECURITY_CACHE_TS.otc < NAME_TTL;
 
   const [twseRows, tpexRows] = await Promise.all([
-    httpJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
-      .catch(() => []),
-    httpJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes")
-      .catch(() => []),
+    useCachedTse
+      ? Promise.resolve(SECURITY_CACHE.tse)
+      : httpJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
+        .then((rows) => {
+          SECURITY_CACHE.tse = rows || [];
+          SECURITY_CACHE_TS.tse = Date.now();
+          return SECURITY_CACHE.tse;
+        })
+        .catch(() => SECURITY_CACHE.tse || []),
+    useCachedOtc
+      ? Promise.resolve(SECURITY_CACHE.otc)
+      : httpJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes")
+        .then((rows) => {
+          SECURITY_CACHE.otc = rows || [];
+          SECURITY_CACHE_TS.otc = Date.now();
+          return SECURITY_CACHE.otc;
+        })
+        .catch(() => SECURITY_CACHE.otc || []),
   ]);
 
   for (const r of twseRows || []) {
@@ -117,10 +132,6 @@ async function loadSecurityTable() {
     }
   }
 
-  if (Object.keys(table).length) {
-    SECURITY_CACHE = table;
-    SECURITY_CACHE_TS = Date.now();
-  }
   return table;
 }
 
