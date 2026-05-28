@@ -16,6 +16,14 @@ const NAME_TTL = 12 * 60 * 60 * 1000; // 12 小時
 const INTRADAY_CACHE = new Map();
 const INTRADAY_TTL = 5 * 60 * 1000; // 5 分鐘,避免當日列因上游短暫空值忽隱忽現
 
+// 歷史日線月份快取:同一檔短時間重查時,避免反覆打 TWSE/TPEX 月資料端點。
+// key: `${marketKey}_${code}_${yyyymm}` → { ts, rows, promise }
+const DAILY_MONTH_CACHE = new Map();
+const DAILY_MONTH_TTL = 10 * 60 * 1000; // 10 分鐘;日線盤後才會更新,盤中即時列另由 intraday 補足
+const DAILY_MONTH_CACHE_MAX = 500;
+const MAX_DAILY_MONTHS = 5;
+const TRADING_DAYS_PER_MONTH = 20;
+
 async function httpJson(url, opts) {
   // 為外部 API 加上 timeout,避免 TWSE/TPEX 連線懸住時 Express handler 也一直等
   // opts.ua 可改短 UA(Yahoo 對完整 Chrome UA 會 429,要用短 UA)
@@ -85,36 +93,30 @@ async function loadSecurityTable() {
     return SECURITY_CACHE;
   }
   const table = {};
-  // 上市
-  try {
-    const rows = await httpJson(
-      "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL"
-    );
-    for (const r of rows) {
-      const code = String(r.Code || "").trim();
-      const name = String(r.Name || "").trim();
-      if (/^\d{4}$/.test(code) && name) {
-        table[code] = { name, marketKey: "tse", market: "上市" };
-      }
+
+  const [twseRows, tpexRows] = await Promise.all([
+    httpJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
+      .catch(() => []),
+    httpJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes")
+      .catch(() => []),
+  ]);
+
+  for (const r of twseRows || []) {
+    const code = String(r.Code || "").trim();
+    const name = String(r.Name || "").trim();
+    if (/^\d{4}$/.test(code) && name) {
+      table[code] = { name, marketKey: "tse", market: "上市" };
     }
-  } catch (e) {
-    /* 容錯:單一來源失敗不影響另一個 */
   }
-  // 上櫃
-  try {
-    const rows = await httpJson(
-      "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
-    );
-    for (const r of rows) {
-      const code = String(r.SecuritiesCompanyCode || "").trim();
-      const name = String(r.CompanyName || "").trim();
-      if (/^\d{4}$/.test(code) && name) {
-        table[code] = { name, marketKey: "otc", market: "上櫃" };
-      }
+
+  for (const r of tpexRows || []) {
+    const code = String(r.SecuritiesCompanyCode || "").trim();
+    const name = String(r.CompanyName || "").trim();
+    if (/^\d{4}$/.test(code) && name) {
+      table[code] = { name, marketKey: "otc", market: "上櫃" };
     }
-  } catch (e) {
-    /* 容錯 */
   }
+
   if (Object.keys(table).length) {
     SECURITY_CACHE = table;
     SECURITY_CACHE_TS = Date.now();
@@ -375,56 +377,109 @@ function parseIntraday(m) {
   return r;
 }
 
+function monthSpec(today, back) {
+  let year = today.getFullYear();
+  let month = today.getMonth() + 1 - back;
+  while (month <= 0) {
+    month += 12;
+    year -= 1;
+  }
+  const mm = String(month).padStart(2, "0");
+  return { year, mm, yyyymm: `${year}${mm}` };
+}
+
+function dailyMonthUrl(code, marketKey, spec) {
+  if (marketKey === "tse") {
+    return (
+      "https://www.twse.com.tw/exchangeReport/STOCK_DAY" +
+      `?response=json&date=${spec.yyyymm}01&stockNo=${code}`
+    );
+  }
+  return (
+    "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock" +
+    `?code=${code}&date=${spec.year}/${spec.mm}/01&id=&response=json`
+  );
+}
+
+function pruneDailyMonthCache() {
+  const now = Date.now();
+  for (const [key, cached] of DAILY_MONTH_CACHE) {
+    if (!cached.promise && cached.ts && now - cached.ts >= DAILY_MONTH_TTL) {
+      DAILY_MONTH_CACHE.delete(key);
+    }
+  }
+  while (DAILY_MONTH_CACHE.size > DAILY_MONTH_CACHE_MAX) {
+    const oldestKey = DAILY_MONTH_CACHE.keys().next().value;
+    if (!oldestKey) break;
+    DAILY_MONTH_CACHE.delete(oldestKey);
+  }
+}
+
+async function fetchDailyMonth(code, marketKey, spec) {
+  const key = `${marketKey}_${code}_${spec.yyyymm}`;
+  const cached = DAILY_MONTH_CACHE.get(key);
+  const now = Date.now();
+  if (cached && cached.rows && now - cached.ts < DAILY_MONTH_TTL) {
+    return cached.rows;
+  }
+  if (cached && cached.promise) return cached.promise;
+
+  const promise = httpJson(dailyMonthUrl(code, marketKey, spec), { timeoutMs: 10000 })
+    .then((data) => {
+      let recs = data.data;
+      if (!recs && data.tables && data.tables[0]) recs = data.tables[0].data;
+      const rows = [];
+      for (const rec of recs || []) {
+        const p = parseDailyRow(rec, marketKey);
+        if (p) rows.push(p);
+      }
+      DAILY_MONTH_CACHE.set(key, { ts: Date.now(), rows });
+      pruneDailyMonthCache();
+      return rows;
+    })
+    .catch((e) => {
+      if (cached && cached.rows) {
+        DAILY_MONTH_CACHE.set(key, { ts: cached.ts, rows: cached.rows });
+        return cached.rows;
+      }
+      DAILY_MONTH_CACHE.delete(key);
+      throw e;
+    });
+
+  DAILY_MONTH_CACHE.set(key, {
+    ts: cached ? cached.ts : now,
+    rows: cached && cached.rows,
+    promise,
+  });
+  return promise;
+}
+
 // 歷史日線
-// 加整體 deadline:最多回溯 5 個月份,每個 upstream call 預設 10s timeout,
-// 最壞情況會等到 ~50s。改成總預算 15s,逾時剩餘月份直接放棄,handler 不被卡死。
+// 依 days 估算需要月份數,最多 5 個月份;月份請求並行抓取,並用短期快取吸收重複查詢。
 async function fetchDaily(code, marketKey, days) {
+  const wantedDays =
+    Number.isFinite(days) && days > 0 ? Math.min(Math.floor(days), 60) : 10;
   const today = new Date();
+  const monthCount = Math.min(
+    MAX_DAILY_MONTHS,
+    Math.ceil((wantedDays + 1) / TRADING_DAYS_PER_MONTH) + 1
+  );
+  const monthRows = await Promise.all(
+    Array.from({ length: monthCount }, (_, back) =>
+      fetchDailyMonth(code, marketKey, monthSpec(today, back)).catch(() => [])
+    )
+  );
+
   const rows = [];
   const seen = new Set();
-  const deadline = Date.now() + 15000;
-  for (let back = 0; back < 5; back++) {
-    const remaining = deadline - Date.now();
-    if (remaining < 1500) break; // 剩不到 1.5s 就不再發新 request
-    let y = today.getFullYear();
-    let mth = today.getMonth() + 1 - back;
-    while (mth <= 0) {
-      mth += 12;
-      y -= 1;
+  for (const rec of monthRows.flat()) {
+    if (rec && !seen.has(rec.date)) {
+      seen.add(rec.date);
+      rows.push(rec);
     }
-    const mm = String(mth).padStart(2, "0");
-    let url, isTpex;
-    if (marketKey === "tse") {
-      url =
-        "https://www.twse.com.tw/exchangeReport/STOCK_DAY" +
-        `?response=json&date=${y}${mm}01&stockNo=${code}`;
-      isTpex = false;
-    } else {
-      url =
-        "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock" +
-        `?code=${code}&date=${y}/${mm}/01&id=&response=json`;
-      isTpex = true;
-    }
-    let data;
-    try {
-      // 單次 timeout 取「剩餘預算」與「預設 10s」中的較小者,避免最後一輪超出整體 deadline
-      data = await httpJson(url, { timeoutMs: Math.min(remaining, 10000) });
-    } catch (e) {
-      continue;
-    }
-    let recs = data.data;
-    if (!recs && data.tables && data.tables[0]) recs = data.tables[0].data;
-    for (const rec of recs || []) {
-      const p = parseDailyRow(rec, marketKey);
-      if (p && !seen.has(p.date)) {
-        seen.add(p.date);
-        rows.push(p);
-      }
-    }
-    if (rows.length >= days + 1) break;
   }
   rows.sort((a, b) => (a.date < b.date ? 1 : -1));
-  return rows.slice(0, days + 1);
+  return rows.slice(0, wantedDays + 1);
 }
 
 // 日線列: [民國日期, 量, 金額, 開, 高, 低, 收, 漲跌, 筆數]

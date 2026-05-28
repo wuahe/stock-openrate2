@@ -64,7 +64,7 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 `/api/stock` → `resolveStock(q)` → `fetchDaily(code, marketKey, days)` → `compute(rows)` → JSON。
 
 1. **`resolveStock`** 把中文名稱或 4 位代號解析成個股資訊,並抓盤中即時報價。名稱對多檔時會丟錯並列出候選代號。
-2. **`fetchDaily`** 抓歷史日線:往回最多 5 個月、依日期去重,取 `days + 1` 筆(多抓 1 筆當最舊一天的昨收)。
+2. **`fetchDaily`** 抓歷史日線:依 `days` 估算月份數、最多往回 5 個月並行抓取,依日期去重,取 `days + 1` 筆(多抓 1 筆當最舊一天的昨收)。
 3. **`compute`** 逐日算溢價%與漲跌%,並**捨棄最舊那筆**(它只當 prevClose 用)。
 
 ### 三個官方資料來源(各有脾氣)
@@ -74,7 +74,7 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 | 個股清單(名稱↔代號) | `openapi.twse.com.tw` STOCK_DAY_ALL(上市)+ `tpex.org.tw/openapi`(上櫃) | 模組層 `SECURITY_CACHE` 快取 12 小時 |
 | 盤中即時報價(主) | Yahoo Finance `query1.finance.yahoo.com/v7/finance/chart/{code}.TW(.TWO)` | 5d range,最後一根 bar 當日 OHLCV + `regularMarketPrice` 當現價 |
 | 盤中即時報價(備) | `mis.twse.com.tw` getStockInfo.jsp | Yahoo 失敗才用;`z` 即時價會短暫為 null,改成「有 open/prev 即顯示」 |
-| 歷史日線 | `twse.com.tw` STOCK_DAY(上市)/ `tpex.org.tw` tradingStock(上櫃) | 回應結構不同,見下 |
+| 歷史日線 | `twse.com.tw` STOCK_DAY(上市)/ `tpex.org.tw` tradingStock(上櫃) | 以月份為單位短期快取 10 分鐘;回應結構不同,見下 |
 
 ### 關鍵陷阱(改抓取邏輯前必讀)
 
