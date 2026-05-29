@@ -244,7 +244,7 @@
         status.className = "err";
         status.textContent = "✗ " + data.error;
       } else {
-        var stamp = "查詢時間 " + new Date(data.fetchedAt).toLocaleString("zh-TW");
+        var stamp = "查詢時間 " + twClock(data.fetchedAt) + "(台北)";
         if (data.dailyStale) {
           // Yahoo 連續失敗時退回 24 小時內的舊歷史快取;標示給用戶知道
           var hrs = Math.round((data.dailyStaleAgeMs || 0) / 3600000);
@@ -373,6 +373,18 @@
   function md(iso) { return iso.slice(5).replace("-", "/"); }
   function pad(s, n) { s = String(s); while (s.length < n) s = " " + s; return s; }
 
+  // 把 ISO 時間(或現在)格式化為台北時間 MM/DD HH:MM
+  // 鎖 Asia/Taipei,不用瀏覽器時區(海外使用者才不會看到當地時間且沒標時區),與主頁一致
+  function twClock(iso) {
+    var d = iso ? new Date(iso) : new Date();
+    var p = {};
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Taipei", hour12: false,
+      month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit"
+    }).formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    return p.month + "/" + p.day + " " + p.hour + ":" + p.minute;
+  }
+
   function buildLine(d, sepLen) {
     var s = d.stock, it = d.intraday || {};
     var n = sepLen || 11;
@@ -399,7 +411,7 @@
     L.push("📐 漲跌% = (今收−昨收)/昨收");
     L.push("📐 量比 = 當日張數 ÷ 近 20 日均量");
     L.push("📡 即時:TPEX｜歷史:Yahoo");
-    L.push("🕒 " + new Date(d.fetchedAt).toLocaleString("zh-TW"));
+    L.push("🕒 " + twClock(d.fetchedAt) + "(台北)");
     L.push(bar);
     return L.join("\n");
   }

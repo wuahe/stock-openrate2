@@ -89,6 +89,24 @@ function isTodayIntraday(intraday) {
 }
 
 // ---- 個股清單:名稱 <-> 代號 ----
+// 只有拿到「非空清單」才更新快取與時間戳。
+// HTTP 200 但 body 為空陣列(維護/盤前)若也寫進快取,會把空清單凍住 NAME_TTL(12 小時),
+// 導致該市場所有查詢都回「找不到」。空回應/失敗一律沿用舊快取(沒有舊的才回 []),且不更新時間戳。
+async function fetchSecurityList(marketKey, url, useCached) {
+  if (useCached) return SECURITY_CACHE[marketKey] || [];
+  try {
+    const rows = await httpJson(url);
+    if (Array.isArray(rows) && rows.length) {
+      SECURITY_CACHE[marketKey] = rows;
+      SECURITY_CACHE_TS[marketKey] = Date.now();
+      return rows;
+    }
+  } catch (e) {
+    /* 沿用舊快取 */
+  }
+  return SECURITY_CACHE[marketKey] || [];
+}
+
 async function loadSecurityTable() {
   const now = Date.now();
   const table = {};
@@ -96,24 +114,16 @@ async function loadSecurityTable() {
   const useCachedOtc = SECURITY_CACHE.otc && now - SECURITY_CACHE_TS.otc < NAME_TTL;
 
   const [twseRows, tpexRows] = await Promise.all([
-    useCachedTse
-      ? Promise.resolve(SECURITY_CACHE.tse)
-      : httpJson("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
-        .then((rows) => {
-          SECURITY_CACHE.tse = rows || [];
-          SECURITY_CACHE_TS.tse = Date.now();
-          return SECURITY_CACHE.tse;
-        })
-        .catch(() => SECURITY_CACHE.tse || []),
-    useCachedOtc
-      ? Promise.resolve(SECURITY_CACHE.otc)
-      : httpJson("https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes")
-        .then((rows) => {
-          SECURITY_CACHE.otc = rows || [];
-          SECURITY_CACHE_TS.otc = Date.now();
-          return SECURITY_CACHE.otc;
-        })
-        .catch(() => SECURITY_CACHE.otc || []),
+    fetchSecurityList(
+      "tse",
+      "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
+      useCachedTse
+    ),
+    fetchSecurityList(
+      "otc",
+      "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+      useCachedOtc
+    ),
   ]);
 
   for (const r of twseRows || []) {

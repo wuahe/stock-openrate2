@@ -66,6 +66,13 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// mis.tpex / openapi 對「今日尚未成交」的價格欄位回 0(不是空字串/null)。
+// 0 在價量上下文等同「無資料」,統一轉 null,前端才顯示「—」而非誤導的 0.00。
+// 即時(parseRealtimeXml)與延遲快照(parseIntradayFromSnapshot)兩條路徑都要套,
+// 否則 mis.tpex 故障退回 openapi 快照時,未成交個股會顯示 0.00 / vs 昨均 -100%。
+// 注意:成交量與昨均(prevAverage)的 0 是有意義的資料,不可套 z2n。
+const z2n = (v) => (v === 0 ? null : v);
+
 // 把 ms timestamp 格式化為台北時區 YYYY-MM-DD
 // 與主站 twstock-core.js 同名函式語意一致;興櫃模組刻意自包含所以不共用
 function twDateFromMs(ms) {
@@ -94,9 +101,13 @@ async function loadSnapshot() {
     if (!/^\d{4,6}[A-Z]?$/.test(code)) continue;
     table[code] = r;
   }
-  SNAPSHOT_CACHE = table;
-  SNAPSHOT_CACHE_TS = Date.now();
-  return table;
+  // 空清單(維護/盤前空回應)不覆寫舊快取也不更新時間戳,避免 60 秒內全部查不到。
+  if (Object.keys(table).length) {
+    SNAPSHOT_CACHE = table;
+    SNAPSHOT_CACHE_TS = Date.now();
+    return table;
+  }
+  return SNAPSHOT_CACHE || table;
 }
 
 async function resolveEmerging(query) {
@@ -177,9 +188,7 @@ function xmlField(xml, tag) {
 }
 
 function parseRealtimeXml(xml) {
-  // mis.tpex 對「今日尚未成交」的欄位回 0(不是空字串/null),所以 num() 解出 0,
-  // 但 0 在價量上下文等同「無資料」,統一轉成 null,前端才會顯示「—」而不是「0.00」
-  const z2n = (v) => (v === 0 ? null : v);
+  // z2n(0→null)已移到模組層,與延遲快照路徑共用,見上方說明。
   const tradeDay = xmlField(xml, "TradeDay"); // "2026/05/25"
   const tradeTime = xmlField(xml, "TradeStatisticTime"); // "13:10"
   const avg = z2n(num(xmlField(xml, "TradeStatisticAverage")));
@@ -200,11 +209,11 @@ function parseRealtimeXml(xml) {
     const bv = num(xmlField(inner, "BuyVol")) || 0;
     const sp = num(xmlField(inner, "SellPrice")) || 0;
     const sv = num(xmlField(inner, "SellVol")) || 0;
-    if (bp > 0 && (bp > bestBid || bp === bestBid)) {
+    if (bp > 0 && bp >= bestBid) {
       if (bp > bestBid) { bestBid = bp; bestBidQty = 0; }
       bestBidQty += bv;
     }
-    if (sp > 0 && (bestAsk === 0 || sp < bestAsk || sp === bestAsk)) {
+    if (sp > 0 && (bestAsk === 0 || sp <= bestAsk)) {
       if (sp !== bestAsk) { bestAsk = sp; bestAskQty = 0; }
       bestAskQty += sv;
     }
@@ -239,13 +248,14 @@ function parseRealtimeXml(xml) {
 }
 
 function parseIntradayFromSnapshot(r) {
-  const buy = num(r.BuyingPrice);
-  const sell = num(r.SellingPrice);
-  const avg = num(r.Average);
+  // 價格欄位套 z2n(0→null);prevAvg 與成交量的 0 有意義,不套(與即時路徑一致)
+  const buy = z2n(num(r.BuyingPrice));
+  const sell = z2n(num(r.SellingPrice));
+  const avg = z2n(num(r.Average));
   const prevAvg = num(r.PreviousAveragePrice);
-  const latest = num(r.LatestPrice);
-  const high = num(r.Highest);
-  const low = num(r.Lowest);
+  const latest = z2n(num(r.LatestPrice));
+  const high = z2n(num(r.Highest));
+  const low = z2n(num(r.Lowest));
   const volShares = num(r.TransactionVolume) || 0; // 興櫃單位為「股」
   const volumeLots = Math.round(volShares / 1000);
 
@@ -334,9 +344,9 @@ async function fetchYahooDaily(code) {
     const volShares = vols[i] || 0;
     rows.push({
       date: iso,
-      open: opens[i] !== null ? round2(opens[i]) : null,
-      high: highs[i] !== null ? round2(highs[i]) : null,
-      low: lows[i] !== null ? round2(lows[i]) : null,
+      open: opens[i] == null ? null : round2(opens[i]),
+      high: highs[i] == null ? null : round2(highs[i]),
+      low: lows[i] == null ? null : round2(lows[i]),
       close: round2(c),
       volumeLots: Math.round(volShares / 1000),
     });
