@@ -176,29 +176,29 @@ async function resolveStock(query) {
   if (!code) throw new Error(`找不到「${query}」,請改用 4 位股票代號查詢`);
 
   const meta = table[code];
-  // 常見路徑:meta 命中,用 Yahoo 抓盤中(比 mis.twse 穩,不會出現 z 短暫為 null)
+  // 常見路徑:meta 命中。即時價以 mis.twse 為主(台灣真即時),
+  // Yahoo query1 對台股延遲約 15–20 分,只當 z 空檔的備援。
   if (meta) {
-    let intraday;
-    try {
-      intraday = await fetchYahooTwIntraday(code, meta.marketKey);
-    } catch (e) {
-      intraday = null;
-    }
-    // Yahoo 當日 bar 偶爾延遲或欄位不完整,這時改抓 TWSE/TPEX 即時端點補今天那列
+    const cacheKey = `${meta.marketKey}_${code}`;
+    // 兩邊並行抓,composeIntraday 以 mis 為基底,z(現價)空檔時用快取良值或 Yahoo 延遲價補上
+    const [mis, yahoo] = await Promise.all([
+      probeCode(code, meta.marketKey)
+        .then((r) => (r ? r.intraday : null))
+        .catch(() => null),
+      fetchYahooTwIntraday(code, meta.marketKey).catch(() => null),
+    ]);
+    let intraday = composeIntraday(mis, yahoo, cacheKey);
+    // 兩個上游都拿不到當日資料時,沿用最近一次良值並標記為延遲快照
     if (!isTodayIntraday(intraday)) {
-      const probed = await probeCode(code, meta.marketKey);
-      if (probed && isTodayIntraday(probed.intraday)) intraday = probed.intraday;
-    }
-    // 兩個上游都短暫空值時,沿用最近一次可用的當日資料,並標記為快取
-    if (!isTodayIntraday(intraday)) {
-      const cached = INTRADAY_CACHE.get(`${meta.marketKey}_${code}`);
+      const cached = INTRADAY_CACHE.get(cacheKey);
       intraday =
         cached && Date.now() - cached.ts < INTRADAY_TTL
           ? { ...cached.intraday, stale: true }
           : intraday || { hasQuote: false };
     }
-    if (isTodayIntraday(intraday)) {
-      INTRADAY_CACHE.set(`${meta.marketKey}_${code}`, {
+    // 只把「含真實現價的當日資料」寫入快取,供下次 z 空檔補洞
+    if (isTodayIntraday(intraday) && intraday.price !== null) {
+      INTRADAY_CACHE.set(cacheKey, {
         ts: Date.now(),
         intraday: { ...intraday, stale: false },
       });
@@ -215,16 +215,9 @@ async function resolveStock(query) {
   for (const mkt of ["tse", "otc"]) {
     const info = await probeCode(code, mkt);
     if (info) {
-      try {
-        const yahoo = await fetchYahooTwIntraday(code, mkt);
-        // 只在 Yahoo 是今天資料、或 probeCode 本來就不是今天時才覆寫,
-        // 避免 Yahoo 延遲快照蓋掉 mis.twse 的今日資料
-        if (yahoo && (isTodayIntraday(yahoo) || !isTodayIntraday(info.intraday))) {
-          info.intraday = yahoo;
-        }
-      } catch (e) {
-        /* 用 probeCode 的 intraday 兜底 */
-      }
+      const yahoo = await fetchYahooTwIntraday(code, mkt).catch(() => null);
+      // 同樣以 mis.twse(probeCode)為主,Yahoo 只補 z 空檔
+      info.intraday = composeIntraday(info.intraday, yahoo, `${mkt}_${code}`);
       return info;
     }
   }
@@ -396,6 +389,42 @@ function parseIntraday(m) {
   r.limitLocked =
     price !== null && r.limitUp !== null && Math.abs(price - r.limitUp) < 0.01;
   return r;
+}
+
+// 合成盤中即時:mis.twse 為主(台灣真即時),Yahoo(query1)延遲約 15–20 分只當備援。
+// mis 的 z(現價)在「成交空檔」會回 null,這時依序用「近期快取良值 → Yahoo 延遲價」補上,
+// 讓現價不致閃爍或落空;其餘開/高/低/昨收/量/漲跌停一律以 mis 即時值為準。
+function composeIntraday(mis, yahoo, cacheKey) {
+  const misToday = isTodayIntraday(mis);
+  // mis 不是今日資料(失敗或盤前):退回 Yahoo 當日,再不行給能用的那個或空殼
+  if (!misToday) {
+    return isTodayIntraday(yahoo) ? yahoo : mis || yahoo || { hasQuote: false };
+  }
+  // mis 是今日且有現價 → 直接用(真即時)
+  if (mis.price !== null) return mis;
+  // z 空檔:近期快取良值最貼近現價,優先;否則退回 Yahoo 延遲價
+  const cached = INTRADAY_CACHE.get(cacheKey);
+  const cachedPrice =
+    cached && Date.now() - cached.ts < INTRADAY_TTL && cached.intraday.price != null
+      ? cached.intraday.price
+      : null;
+  const fill =
+    cachedPrice != null
+      ? cachedPrice
+      : yahoo && yahoo.price != null
+      ? yahoo.price
+      : null;
+  if (fill == null) return mis;
+  const out = { ...mis, price: fill, hasQuote: true };
+  const prev = out.prevClose;
+  if (prev) {
+    out.change = +(fill - prev).toFixed(2);
+    out.changePct = +(((fill - prev) / prev) * 100).toFixed(2);
+  }
+  out.limitLocked =
+    (out.limitUp !== null && Math.abs(fill - out.limitUp) < 0.01) ||
+    (out.limitDown !== null && Math.abs(fill - out.limitDown) < 0.01);
+  return out;
 }
 
 function monthSpec(today, back) {

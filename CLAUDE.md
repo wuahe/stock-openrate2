@@ -72,8 +72,8 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 | 用途 | 端點 | 備註 |
 |------|------|------|
 | 個股清單(名稱↔代號) | `openapi.twse.com.tw` STOCK_DAY_ALL(上市)+ `tpex.org.tw/openapi`(上櫃) | 模組層 `SECURITY_CACHE` 快取 12 小時 |
-| 盤中即時報價(主) | Yahoo Finance `query1.finance.yahoo.com/v7/finance/chart/{code}.TW(.TWO)` | 5d range,最後一根 bar 當日 OHLCV + `regularMarketPrice` 當現價 |
-| 盤中即時報價(備) | `mis.twse.com.tw` getStockInfo.jsp | Yahoo 失敗才用;`z` 即時價會短暫為 null,改成「有 open/prev 即顯示」 |
+| 盤中即時報價(主) | `mis.twse.com.tw` getStockInfo.jsp | 台灣**真即時**(分鐘級)。`z`=現價、`o/h/l/y/v/u/w` 開高低昨收量漲跌停。`z` 在「成交空檔」會回 `-`(null) |
+| 盤中即時報價(備,補洞) | Yahoo Finance `query1.finance.yahoo.com/v7/finance/chart/{code}.TW(.TWO)` | **query1 對台股延遲約 15–20 分**,只在 mis.twse `z` 空檔/失敗時補現價。最後一根 bar 當日 OHLCV + `regularMarketPrice` |
 | 歷史日線 | `twse.com.tw` STOCK_DAY(上市)/ `tpex.org.tw` tradingStock(上櫃) | 以月份為單位短期快取 10 分鐘;回應結構不同,見下 |
 
 ### 關鍵陷阱(改抓取邏輯前必讀)
@@ -83,6 +83,7 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 - **TWSE / TPEX 回應結構不同**:TWSE 資料在 `data.data`,TPEX 可能在 `data.tables[0].data`。
 - **錯誤契約**:`/api/stock` 即使出錯也回 **HTTP 200**,錯誤訊息放在 body 的 `error` 欄位。前端靠 `data.error` 判斷。新增錯誤路徑請維持此約定。
 - **溢價%定義**:`(今開 − 昨收) / 昨收`;漲跌%為 `(今收 − 昨收) / 昨收`。前後端、LINE 版面都依此定義,改動需同步。
+- **盤中即時以 mis.twse 為主、Yahoo 為備**(改 `resolveStock` 前必讀):Yahoo `query1` 對台股 `regularMarketPrice` **延遲約 15–20 分**(實測:真實 10:34、Yahoo 報 10:14),快速波動時會顯示舊價。`composeIntraday` 以 mis.twse 為基底,只在 `z` 為 `-`(成交空檔)時依序用「`INTRADAY_CACHE` 近期良值 → Yahoo 延遲價」補現價,確保不閃爍。**不要因為「Yahoo 結構穩」就把它改回主來源**——那會重新引入延遲。`v7/quote`+crumb 沒用,是同一個延遲值。
 - **Yahoo 反限流**(改 `fetchYahooTwIntraday` 前必讀):Yahoo 對「完整 Chrome UA」會 HTTP 429,**必須用短 UA `Mozilla/5.0`**(`httpJson(url, { ua: "Mozilla/5.0" })`)。不要動 `UA` 常數,那是給 TWSE/TPEX 用的。
 - **Yahoo 浮點雜訊**:Yahoo 回傳是 IEEE 754 原值(`22.149999618530273`),`fetchYahooTwIntraday` 用 `r2 = v => +v.toFixed(2)` 統一四捨五入。
 - **Yahoo 偶爾缺天**:Yahoo `quote.close[i-1]` 可能是 null(如 0050 在某天無資料)。昨收用「從尾巴往前找最近一筆非空 close」,別寫死 `[i-1]`。
