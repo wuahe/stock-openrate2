@@ -47,6 +47,27 @@ async function httpJson(url, opts) {
   }
 }
 
+// 同 httpJson,但回傳純文字(用於抓 tw.stock.yahoo.com 個股頁 HTML)
+async function httpText(url, opts) {
+  const { ua = UA, timeoutMs = 10000 } =
+    typeof opts === "number" ? { timeoutMs: opts } : opts || {};
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": ua },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.text();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error(`上游逾時 ${timeoutMs}ms: ${url.slice(0, 60)}…`);
+    throw e;
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
 function num(v) {
   if (v === null || v === undefined) return null;
   const n = parseFloat(String(v).replace(/,/g, "").replace(/\+/g, "").trim());
@@ -176,19 +197,21 @@ async function resolveStock(query) {
   if (!code) throw new Error(`找不到「${query}」,請改用 4 位股票代號查詢`);
 
   const meta = table[code];
-  // 常見路徑:meta 命中。即時價以 mis.twse 為主(台灣真即時),
-  // Yahoo query1 對台股延遲約 15–20 分,只當 z 空檔的備援。
+  // 常見路徑:meta 命中。即時價以 tw.stock.yahoo.com(台灣真即時最後成交價)為主;
+  // 取不到當日現價時才退抓 mis.twse(z 常空)與 query1(延遲約 15–20 分)合成。
   if (meta) {
     const cacheKey = `${meta.marketKey}_${code}`;
-    // 兩邊並行抓,composeIntraday 以 mis 為基底,z(現價)空檔時用快取良值或 Yahoo 延遲價補上
-    const [mis, yahoo] = await Promise.all([
-      probeCode(code, meta.marketKey)
-        .then((r) => (r ? r.intraday : null))
-        .catch(() => null),
-      fetchYahooTwIntraday(code, meta.marketKey).catch(() => null),
-    ]);
-    let intraday = composeIntraday(mis, yahoo, cacheKey);
-    // 兩個上游都拿不到當日資料時,沿用最近一次良值並標記為延遲快照
+    let intraday = await fetchYahooTwPage(code, meta.marketKey).catch(() => null);
+    if (!(isTodayIntraday(intraday) && intraday.price !== null)) {
+      const [mis, yahoo] = await Promise.all([
+        probeCode(code, meta.marketKey)
+          .then((r) => (r ? r.intraday : null))
+          .catch(() => null),
+        fetchYahooTwIntraday(code, meta.marketKey).catch(() => null),
+      ]);
+      intraday = composeIntraday([intraday, mis, yahoo], cacheKey);
+    }
+    // 全部來源都拿不到當日資料時,沿用最近一次良值並標記為延遲快照
     if (!isTodayIntraday(intraday)) {
       const cached = INTRADAY_CACHE.get(cacheKey);
       intraday =
@@ -215,9 +238,9 @@ async function resolveStock(query) {
   for (const mkt of ["tse", "otc"]) {
     const info = await probeCode(code, mkt);
     if (info) {
-      const yahoo = await fetchYahooTwIntraday(code, mkt).catch(() => null);
-      // 同樣以 mis.twse(probeCode)為主,Yahoo 只補 z 空檔
-      info.intraday = composeIntraday(info.intraday, yahoo, `${mkt}_${code}`);
+      const twpage = await fetchYahooTwPage(code, mkt).catch(() => null);
+      // 同樣以 TW 頁為主,probeCode(mis)為備
+      info.intraday = composeIntraday([twpage, info.intraday], `${mkt}_${code}`);
       return info;
     }
   }
@@ -320,6 +343,71 @@ async function fetchYahooTwIntraday(code, marketKey) {
   return out;
 }
 
+// tw.stock.yahoo.com 個股頁:server-rendered HTML 內嵌即時報價 JSON。
+// 這是台灣「真即時最後成交價」來源 — 即使 mis.twse 的 z 長時間空檔,它仍握著最後成交價;
+// 也比 query1 全球端點即時(query1 對台股延遲約 15–20 分)。代價:每次抓整頁 HTML(~350KB)。
+// 解析錨點:`"price":{"raw":"…"` 全頁僅出現一次(主報價),再以 symbol 二次確認讀對代號。
+async function fetchYahooTwPage(code, marketKey) {
+  const suffix = marketKey === "tse" ? ".TW" : ".TWO";
+  const html = await httpText(`https://tw.stock.yahoo.com/quote/${code}${suffix}`, {
+    ua: "Mozilla/5.0",
+    timeoutMs: 10000,
+  });
+  const i = html.indexOf('"price":{"raw"');
+  if (i < 0) return { hasQuote: false };
+  const seg = html.slice(i, i + 800);
+  const symMatch = seg.match(/"symbol":"([^"]+)"/);
+  if (!symMatch || symMatch[1] !== `${code}${suffix}`) return { hasQuote: false };
+  const grab = (field) => {
+    const m = seg.match(new RegExp(`"${field}":\\{"raw":"([0-9.]+)"`));
+    return m ? +m[1] : null;
+  };
+  const price = grab("price");
+  const open = grab("regularMarketOpen");
+  const prev = grab("regularMarketPreviousClose");
+  const high = grab("regularMarketDayHigh");
+  const low = grab("regularMarketDayLow");
+  const tMatch = seg.match(/"regularMarketTime":"([^"]+)"/);
+  const volMatch = seg.match(/"volume":"(\d+)"/);
+  const tMs = tMatch ? Date.parse(tMatch[1]) : 0;
+  const quoteDate = twDateFromMs(tMs || Date.now());
+  const time = tMs
+    ? new Date(tMs).toLocaleTimeString("en-GB", {
+        timeZone: "Asia/Taipei",
+        hour12: false,
+      })
+    : "";
+  // Yahoo volume 單位是「股」,÷1000 換張
+  const volumeLots = volMatch ? Math.round(+volMatch[1] / 1000) : 0;
+  const limitUp = twLimitPrice(prev, true);
+  const limitDown = twLimitPrice(prev, false);
+  const out = {
+    quoteDate,
+    time,
+    price,
+    open,
+    high,
+    low,
+    prevClose: prev,
+    volumeLots,
+    limitUp,
+    limitDown,
+    hasQuote: price !== null,
+  };
+  if (price !== null && prev) {
+    out.change = +(price - prev).toFixed(2);
+    out.changePct = +(((price - prev) / prev) * 100).toFixed(2);
+  }
+  if (open !== null && prev) {
+    out.premiumPct = +(((open - prev) / prev) * 100).toFixed(2);
+  }
+  out.limitLocked =
+    price !== null &&
+    ((limitUp !== null && Math.abs(price - limitUp) < 0.001) ||
+      (limitDown !== null && Math.abs(price - limitDown) < 0.001));
+  return out;
+}
+
 // 盤中即時報價(含一次重試,吸收偶發限流)
 async function probeCode(code, mkt) {
   const url =
@@ -391,31 +479,23 @@ function parseIntraday(m) {
   return r;
 }
 
-// 合成盤中即時:mis.twse 為主(台灣真即時),Yahoo(query1)延遲約 15–20 分只當備援。
-// mis 的 z(現價)在「成交空檔」會回 null,這時依序用「近期快取良值 → Yahoo 延遲價」補上,
-// 讓現價不致閃爍或落空;其餘開/高/低/昨收/量/漲跌停一律以 mis 即時值為準。
-function composeIntraday(mis, yahoo, cacheKey) {
-  const misToday = isTodayIntraday(mis);
-  // mis 不是今日資料(失敗或盤前):退回 Yahoo 當日,再不行給能用的那個或空殼
-  if (!misToday) {
-    return isTodayIntraday(yahoo) ? yahoo : mis || yahoo || { hasQuote: false };
-  }
-  // mis 是今日且有現價 → 直接用(真即時)
-  if (mis.price !== null) return mis;
-  // z 空檔:近期快取良值最貼近現價,優先;否則退回 Yahoo 延遲價
+// 從多個即時來源(依優先序)合成盤中即時。優先序:
+// tw.stock.yahoo.com(真即時最後成交價)→ mis.twse(真即時但 z 常空)→ query1(延遲 15–20 分,最後手段)。
+// 取第一個「當日且有現價」的來源;若有當日資料但都沒現價(罕見),取最高優先當日基底,
+// 用 INTRADAY_CACHE 近期良值補現價,確保現價不落空、不閃爍。
+function composeIntraday(candidates, cacheKey) {
+  const today = candidates.filter(isTodayIntraday);
+  const withPrice = today.find((c) => c.price != null);
+  if (withPrice) return withPrice;
+  const base = today[0];
+  if (!base) return candidates.find(Boolean) || { hasQuote: false };
   const cached = INTRADAY_CACHE.get(cacheKey);
-  const cachedPrice =
+  const fill =
     cached && Date.now() - cached.ts < INTRADAY_TTL && cached.intraday.price != null
       ? cached.intraday.price
       : null;
-  const fill =
-    cachedPrice != null
-      ? cachedPrice
-      : yahoo && yahoo.price != null
-      ? yahoo.price
-      : null;
-  if (fill == null) return mis;
-  const out = { ...mis, price: fill, hasQuote: true };
+  if (fill == null) return base;
+  const out = { ...base, price: fill, hasQuote: true };
   const prev = out.prevClose;
   if (prev) {
     out.change = +(fill - prev).toFixed(2);
