@@ -258,7 +258,7 @@
   <div id="result"></div>
 
   <div class="pagefoot">
-    資料來源:台灣證券交易所 / 證券櫃檯買賣中心 官方端點<br />
+    資料來源:歷史日線與個股清單為台灣證券交易所 / 證券櫃檯買賣中心官方端點;盤中即時現價為 Yahoo 台股<br />
     本工具僅作資料整理與呈現,不構成投資建議
   </div>
 </div>
@@ -552,7 +552,7 @@
     });
     L.push("📐 溢價%=(今開−昨收)/昨收");
     L.push("📐 漲跌%=(今收−昨收)/昨收");
-    L.push("📡 資料:TWSE / TPEX 官方");
+    L.push("📡 資料:TWSE / TPEX 官方(盤中即時:Yahoo 台股)");
     L.push("🕒 查詢時間 " + twClock(d.fetchedAt) + "(台北)");
     if (iz.hasQuote && live) L.push("⚠️ 盤中為即時快照,收盤後可再查核對");
     if (iz.hasQuote && iz.quoteDate && !quoteIsToday) L.push("ℹ 即時源目前回傳最近交易日,未補入今日列");
@@ -564,7 +564,7 @@
     var s = d.stock;
     var head = "你是一位專業的股票分析師。先給接下來這幾天該如何操作的建議,然後再做分析及未來的展望。\n" +
       "以下是「" + s.name + "(" + s.code + ")」近 " +
-      d.daily.length + " 日的開盤溢價追蹤資料(TWSE/TPEX 官方)。" +
+      d.daily.length + " 日的開盤溢價追蹤資料(歷史為 TWSE/TPEX 官方、盤中即時現價為 Yahoo 台股)。" +
       "請用專業但中立的角度,評論它的漲跌趨勢,並提醒這非投資建議。\n\n";
     return head + buildLine(d, 8);
   }

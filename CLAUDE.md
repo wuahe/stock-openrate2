@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 專案概述
 
-台股開盤溢價追蹤工具。查詢上市/上櫃個股近 N 日的開盤溢價%、漲跌%、收盤與成交量,附盤中即時報價,輸出 LINE 友善版面。零 AI、零金鑰,資料全部來自 TWSE / TPEX 官方公開端點。部署於 Zeabur。
+台股開盤溢價追蹤工具。查詢上市/上櫃個股近 N 日的開盤溢價%、漲跌%、收盤與成交量,附盤中即時報價,輸出 LINE 友善版面。零 AI、零金鑰。**歷史日線與個股清單**來自 TWSE / TPEX 官方公開端點;**盤中即時現價**主來源為 Yahoo 台股頁(`tw.stock.yahoo.com`),mis.twse / Yahoo query1 為備援(原因見下「盤中即時三來源優先序」)。部署於 Zeabur。
 
 ## 常用指令
 
