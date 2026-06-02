@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 溝通語言
+
+**一律用繁體中文(zh-Hant)回應**,包含工具呼叫前後的說明文字、進度回報與總結。**絕不使用日文**。
+
 ## 專案概述
 
 台股開盤溢價追蹤工具。查詢上市/上櫃個股近 N 日的開盤溢價%、漲跌%、收盤與成交量,附盤中即時報價,輸出 LINE 友善版面。零 AI、零金鑰,資料全部來自 TWSE / TPEX 官方公開端點。部署於 Zeabur。
