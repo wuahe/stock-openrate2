@@ -165,6 +165,7 @@
     background: var(--up); color: #fff; padding: 2px 6px;
     border-radius: 5px; vertical-align: middle; font-weight: 700;
   }
+  .lock.down { background: var(--down); }
 
   .tablewrap { padding: 8px 6px 4px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
@@ -469,7 +470,10 @@
            '<div class="bigprice"><span class="p ' + cls(iz.changePct) + '">' +
            fmt2(iz.price) + "</span>" +
            '<span class="chg ' + cls(iz.changePct) + '">' + sign(iz.changePct) +
-           (iz.limitLocked ? '<span class="lock">漲停鎖死</span>' : "") +
+           (iz.limitLocked
+             ? '<span class="lock ' + (iz.limitDir === "down" ? "down" : "up") + '">' +
+               (iz.limitDir === "down" ? "跌停鎖死" : "漲停鎖死") + "</span>"
+             : "") +
            "</span></div>" +
            '<div class="row2"><span>開 ' + fmt2(iz.open) +
            ' ｜ 溢價 <span class="' + cls(iz.premiumPct) + '">' +
@@ -538,7 +542,7 @@
       L.push((live ? "現價 " : "收盤 ") + fmt2(iz.price) + "  漲跌 " +
              sign(iz.changePct) + mark(iz.changePct));
       L.push("量 " + fmtVol(iz.volumeLots || 0) + "張" +
-             (iz.limitLocked ? "(漲停鎖死)" : ""));
+             (iz.limitLocked ? (iz.limitDir === "down" ? "(跌停鎖死)" : "(漲停鎖死)") : ""));
       L.push(sep);
     }
     d.daily.forEach(function (r) {

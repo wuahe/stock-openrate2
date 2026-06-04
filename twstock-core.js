@@ -266,6 +266,22 @@ function twLimitPrice(prev, isUpper) {
   return +v.toFixed(2);
 }
 
+// 設定漲跌停鎖死狀態與方向。limitDir: "up"(漲停,紅)/"down"(跌停,綠)/null。
+// 前端依 limitDir 決定文字與顏色,別只看 limitLocked。
+function setLimitLock(out, price, limitUp, limitDown, tol = 0.01) {
+  if (price !== null && limitUp !== null && Math.abs(price - limitUp) < tol) {
+    out.limitLocked = true;
+    out.limitDir = "up";
+  } else if (price !== null && limitDown !== null && Math.abs(price - limitDown) < tol) {
+    out.limitLocked = true;
+    out.limitDir = "down";
+  } else {
+    out.limitLocked = false;
+    out.limitDir = null;
+  }
+  return out;
+}
+
 // Yahoo Finance chart API — 比 mis.twse 穩定,當日 bar 含 o/h/l/c/v + regularMarketPrice
 // 上市用 .TW、上櫃用 .TWO。Yahoo 對完整 Chrome UA 會 429,必須用短 UA。
 async function fetchYahooTwIntraday(code, marketKey) {
@@ -336,10 +352,7 @@ async function fetchYahooTwIntraday(code, marketKey) {
   if (open !== null && prev) {
     out.premiumPct = +(((open - prev) / prev) * 100).toFixed(2);
   }
-  out.limitLocked =
-    price !== null &&
-    ((limitUp !== null && Math.abs(price - limitUp) < 0.001) ||
-      (limitDown !== null && Math.abs(price - limitDown) < 0.001));
+  setLimitLock(out, price, limitUp, limitDown, 0.001);
   return out;
 }
 
@@ -401,10 +414,7 @@ async function fetchYahooTwPage(code, marketKey) {
   if (open !== null && prev) {
     out.premiumPct = +(((open - prev) / prev) * 100).toFixed(2);
   }
-  out.limitLocked =
-    price !== null &&
-    ((limitUp !== null && Math.abs(price - limitUp) < 0.001) ||
-      (limitDown !== null && Math.abs(price - limitDown) < 0.001));
+  setLimitLock(out, price, limitUp, limitDown, 0.001);
   return out;
 }
 
@@ -474,8 +484,7 @@ function parseIntraday(m) {
   if (open !== null && prev) {
     r.premiumPct = +(((open - prev) / prev) * 100).toFixed(2);
   }
-  r.limitLocked =
-    price !== null && r.limitUp !== null && Math.abs(price - r.limitUp) < 0.01;
+  setLimitLock(r, price, r.limitUp, r.limitDown, 0.01);
   return r;
 }
 
@@ -501,9 +510,7 @@ function composeIntraday(candidates, cacheKey) {
     out.change = +(fill - prev).toFixed(2);
     out.changePct = +(((fill - prev) / prev) * 100).toFixed(2);
   }
-  out.limitLocked =
-    (out.limitUp !== null && Math.abs(fill - out.limitUp) < 0.01) ||
-    (out.limitDown !== null && Math.abs(fill - out.limitDown) < 0.01);
+  setLimitLock(out, fill, out.limitUp, out.limitDown, 0.01);
   return out;
 }
 
