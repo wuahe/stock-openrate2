@@ -98,10 +98,11 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 - **Yahoo 浮點雜訊**:Yahoo 回傳是 IEEE 754 原值(`22.149999618530273`),`fetchYahooTwIntraday` 用 `r2 = v => +v.toFixed(2)` 統一四捨五入。
 - **Yahoo 偶爾缺天**:Yahoo `quote.close[i-1]` 可能是 null(如 0050 在某天無資料)。昨收用「從尾巴往前找最近一筆非空 close」,別寫死 `[i-1]`。
 - **漲跌停價計算**:Yahoo 不給 limitUp/limitDown,本地按 `prev*1.10` / `prev*0.90` + 台股 tick rounding(`twTickSize`)計算。漲停 `floor`、跌停 `ceil`(往內收)。
+- **漲跌停鎖死要分方向**:`limitLocked` 只是布林,**真正方向看 `limitDir`**(`"up"`/`"down"`/`null`)。前端必須依 `limitDir` 顯示「漲停鎖死」(紅 `--up`)或「跌停鎖死」(綠 `--down`),別硬寫漲停。鎖死狀態統一由 `setLimitLock(out, price, limitUp, limitDown, tol)` 設定;**四個盤中來源 parser 都呼叫它**(`fetchYahooTwIntraday` / `fetchYahooTwPage` 用 tol=0.001,`parseIntraday` / `composeIntraday` 用 0.01)。改鎖死邏輯只動這一個 helper,別在某個 parser 裡單獨判斷(舊 bug 就是 `parseIntraday` 只判漲停、漏跌停)。
 
 ### 前後端契約
 
-`/api/stock?q=<名稱或代號>&days=<1-60>` 回傳 `{ stock, intraday, daily, fetchedAt, source }`,出錯時回 `{ error }`。`days` 在後端夾在 1–60。前端 `buildLine` / `buildAI` 依此結構組 LINE 與 AI 點評文字。
+`/api/stock?q=<名稱或代號>&days=<1-60>` 回傳 `{ stock, intraday, daily, fetchedAt, source }`,出錯時回 `{ error }`。`days` 在後端夾在 1–60。前端 `buildLine` / `buildAI` 依此結構組 LINE 與 AI 點評文字。`intraday` 含 `limitLocked` + `limitDir`(漲跌停方向,見上)。
 
 ## 部署
 

@@ -165,7 +165,9 @@
     background: var(--up); color: #fff; padding: 2px 6px;
     border-radius: 5px; vertical-align: middle; font-weight: 700;
   }
-  .lock.down { background: var(--down); }
+  /* 兩個 class 提高特異性,壓過 .up/.down 的字色,確保鎖死標籤白字 */
+  .lock.up { background: var(--up); color: #fff; }
+  .lock.down { background: var(--down); color: #fff; }
 
   .tablewrap { padding: 8px 6px 4px; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; }
