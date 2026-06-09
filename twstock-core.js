@@ -148,17 +148,17 @@ async function loadSecurityTable() {
   ]);
 
   for (const r of twseRows || []) {
-    const code = String(r.Code || "").trim();
+    const code = String(r.Code || "").trim().toUpperCase();
     const name = String(r.Name || "").trim();
-    if (/^\d{4}$/.test(code) && name) {
+    if (/^\d{4,6}[A-Z]?$/.test(code) && name) {
       table[code] = { name, marketKey: "tse", market: "上市" };
     }
   }
 
   for (const r of tpexRows || []) {
-    const code = String(r.SecuritiesCompanyCode || "").trim();
+    const code = String(r.SecuritiesCompanyCode || "").trim().toUpperCase();
     const name = String(r.CompanyName || "").trim();
-    if (/^\d{4}$/.test(code) && name) {
+    if (/^\d{4,6}[A-Z]?$/.test(code) && name) {
       table[code] = { name, marketKey: "otc", market: "上櫃" };
     }
   }
@@ -173,8 +173,8 @@ async function resolveStock(query) {
   const table = await loadSecurityTable();
 
   let code = null;
-  if (/^\d{4}$/.test(query)) {
-    code = query;
+  if (/^\d{4,6}[A-Za-z]?$/.test(query)) {
+    code = query.toUpperCase();
   } else {
     const entries = Object.entries(table);
     const exact = entries.filter(([, v]) => v.name === query);
@@ -194,7 +194,7 @@ async function resolveStock(query) {
       }
     }
   }
-  if (!code) throw new Error(`找不到「${query}」,請改用 4 位股票代號查詢`);
+  if (!code) throw new Error(`找不到「${query}」,請改用股票代號查詢(如 2330、00878)`);
 
   const meta = table[code];
   // 常見路徑:meta 命中。即時價以 tw.stock.yahoo.com(台灣真即時最後成交價)為主;
