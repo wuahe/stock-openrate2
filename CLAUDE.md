@@ -85,6 +85,7 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 
 - **成交量單位不一致**:TWSE 日線第 2 欄是「成交股數」(股),需 ÷1000 換成張;TPEX 是「成交張數」(張)直接用。處理全在 `parseDailyRow`,以 `marketKey`(`"tse"` / `"otc"`)分流。
 - **日期是民國年**:日線列首欄為 `民國年/月/日`,`parseDailyRow` 用 `+1911` 轉西元。
+- **代號不是只有 4 碼**:台股 ETF 是 5~6 碼(`00878`、`006208`),槓桿/反向 ETF 還帶結尾字母(`00632R`、`00715L`)。代號正則一律用 `\d{4,6}[A-Z]?`(輸入端含 `[A-Za-z]?` 再 `toUpperCase`),**別寫死 `\d{4}`**。三處要同步:`loadSecurityTable` 建 TWSE/TPEX 清單兩處 + `resolveStock` 輸入解析。寫死 4 碼會讓 ETF 連清單都進不去(`table[code]` 永遠 miss),不只是輸入被擋。
 - **TWSE / TPEX 回應結構不同**:TWSE 資料在 `data.data`,TPEX 可能在 `data.tables[0].data`。
 - **錯誤契約**:`/api/stock` 即使出錯也回 **HTTP 200**,錯誤訊息放在 body 的 `error` 欄位。前端靠 `data.error` 判斷。新增錯誤路徑請維持此約定。
 - **溢價%定義**:`(今開 − 昨收) / 昨收`;漲跌%為 `(今收 − 昨收) / 昨收`。前後端、LINE 版面都依此定義,改動需同步。
