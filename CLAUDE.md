@@ -105,6 +105,13 @@ npm start          # 啟動伺服器,預設 http://localhost:8080
 
 `/api/stock?q=<名稱或代號>&days=<1-60>` 回傳 `{ stock, intraday, daily, fetchedAt, source }`,出錯時回 `{ error }`。`days` 在後端夾在 1–60。前端 `buildLine` / `buildAI` 依此結構組 LINE 與 AI 點評文字。`intraday` 含 `limitLocked` + `limitDir`(漲跌停方向,見上)。
 
+### 最近查詢 chip(改 `#hint` 前必讀)
+
+輸入框下方那排 chip 是**雙模式**:查詢成功後把 `{code, name}` 存進瀏覽器 `localStorage`(key `recentStocks`,同代號去重留最新、上限 5 筆),`renderHint()` 在載入時把它們畫出來**取代**寫死範例;**完全沒紀錄(第一次用)才顯示**原本的 2330/2454… 範例。
+- chip 文字是「名稱 代號」,但點擊查詢走 `e.target.dataset.code`(範例 chip 無 `data-code` 才退回 `textContent`)。**別把點擊邏輯改回只讀 textContent**——最近查詢 chip 的文字不是合法查詢字串。
+- chip 一律用 `textContent`/`createElement` 組,沿用防 XSS 慣例,別把名稱拼進 `innerHTML`。
+- 純前端、零後端契約變更;`pushRecent` 只在 `query()` 成功(`data.stock` 存在)時呼叫。
+
 ## 部署
 
 push 到 GitHub 後 Zeabur 自動以 `npm start` 重新部署。`/healthz` 供健康檢查。
