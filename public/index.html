@@ -283,8 +283,11 @@
 
   document.getElementById("hint").addEventListener("click", function (e) {
     if (e.target.tagName === "SPAN") {
-      document.getElementById("q").value = e.target.textContent;
-      query(e.target.textContent);
+      // 最近查詢 chip 顯示「名稱 代號」但帶 data-code,點擊用代號查(最穩);
+      // 範例 chip 無 data-code,退回用文字本身查
+      var q = e.target.dataset.code || e.target.textContent;
+      document.getElementById("q").value = q;
+      query(q);
     }
   });
   document.getElementById("go").addEventListener("click", function () {
@@ -293,6 +296,38 @@
   document.getElementById("q").addEventListener("keydown", function (e) {
     if (e.key === "Enter") query(this.value);
   });
+
+  // ── 最近查詢:存在瀏覽器 localStorage,去重(同代號留最新)、上限 5 筆 ──
+  var RECENT_KEY = "recentStocks";
+  var RECENT_MAX = 5;
+  function loadRecent() {
+    try {
+      var arr = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+      return Array.isArray(arr) ? arr.filter(function (x) { return x && x.code; }) : [];
+    } catch (e) { return []; }
+  }
+  function pushRecent(stock) {
+    if (!stock || !stock.code) return;
+    var arr = loadRecent().filter(function (x) { return x.code !== stock.code; });
+    arr.unshift({ code: stock.code, name: stock.name || stock.code });
+    arr = arr.slice(0, RECENT_MAX);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(arr)); } catch (e) {}
+    renderHint();
+  }
+  // 有最近查詢就畫出來取代範例;完全沒紀錄(第一次用)則保留寫死的範例
+  function renderHint() {
+    var arr = loadRecent();
+    if (!arr.length) return;
+    var hint = document.getElementById("hint");
+    hint.innerHTML = "";
+    arr.forEach(function (x) {
+      var span = document.createElement("span");
+      span.dataset.code = x.code;
+      span.textContent = x.name + " " + x.code; // textContent 防 XSS
+      hint.appendChild(span);
+    });
+  }
+  renderHint();
 
   function toast(msg) {
     var t = document.getElementById("toast");
@@ -418,6 +453,8 @@
       }
       lastData = data;
       render(data);
+      if (data.stock) pushRecent(data.stock); // 查詢成功才記錄
+
     } catch (e) {
       document.getElementById("status").innerHTML = "";
       document.getElementById("result").innerHTML =
